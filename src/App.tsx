@@ -233,7 +233,18 @@ function App() {
       printSettings
     };
     const tpcl = generateTPCL(template);
-    const blob = new Blob([tpcl], { type: 'text/plain' });
+    
+    // Convert string to Windows-1252 bytes for TPCL printer compatibility
+    // Most TPCL printers expect 8-bit encoding (like Windows-1252 or ISO-8859-1)
+    const bytes = new Uint8Array(tpcl.length);
+    for (let i = 0; i < tpcl.length; i++) {
+      const charCode = tpcl.charCodeAt(i);
+      // Basic mapping for Windows-1252 / ISO-8859-1 characters (0-255)
+      // For characters > 255, we'd need a full mapping table, but 0-255 covers most accented chars
+      bytes[i] = charCode <= 255 ? charCode : 63; // 63 is '?'
+    }
+    
+    const blob = new Blob([bytes], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -267,23 +278,38 @@ function App() {
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
-        const content = event.target?.result as string;
-        let template: LabelTemplate;
-        
+        const buffer = event.target?.result as ArrayBuffer;
+        let content = '';
+        let template: LabelTemplate | null = null;
+
+        // Try UTF-8 first
         try {
-          // Try parsing as JSON first
-          template = JSON.parse(content) as LabelTemplate;
-          // Basic validation to ensure it's a valid template
-          if (!template.elements || !Array.isArray(template.elements)) {
-            throw new Error('Invalid JSON template structure');
+          const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
+          content = utf8Decoder.decode(buffer);
+          try {
+            template = JSON.parse(content) as LabelTemplate;
+            if (!template.elements || !Array.isArray(template.elements)) {
+              template = null;
+            }
+          } catch (e) {
+            template = null;
           }
-        } catch (jsonErr) {
-          // If JSON fails, try parsing as TPCL
-          console.log('JSON parse failed, trying TPCL parser:', jsonErr);
-          template = parseTPCL(content);
+        } catch (e) {
+          // Not valid UTF-8, will try windows-1252
         }
 
-        if (template.elements && Array.isArray(template.elements)) {
+        // If UTF-8/JSON failed, try windows-1252 and TPCL
+        if (!template) {
+          const win1252Decoder = new TextDecoder('windows-1252');
+          content = win1252Decoder.decode(buffer);
+          try {
+            template = parseTPCL(content);
+          } catch (tpclErr) {
+            console.error('TPCL parse failed:', tpclErr);
+          }
+        }
+
+        if (template && template.elements && Array.isArray(template.elements)) {
           const normalizedElements = template.elements.map((el) => {
             if (el.type === 'text') {
               const width = el.width < 10 ? Math.round(el.width * 10) : el.width;
@@ -314,7 +340,7 @@ function App() {
         alert('Invalid template file');
       }
     };
-    reader.readAsText(file);
+    reader.readAsArrayBuffer(file);
     // Reset input
     e.target.value = '';
   };

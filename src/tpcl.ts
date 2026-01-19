@@ -126,7 +126,7 @@ export function generateTPCL(label: LabelTemplate): string {
     lines.push('{XS;I,0001,0002C5200|}');
   }
 
-  return lines.join('\n');
+  return lines.join('\r\n') + '\r\n';
 }
 
 export function parseTPCL(tpcl: string): LabelTemplate {
@@ -213,6 +213,8 @@ export function parseTPCL(tpcl: string): LabelTemplate {
       const pcId = commandType.replace('RC', 'PC');
       const def = textDefs.get(pcId);
       if (def) {
+        // Content starts after the first semicolon
+        const content = cleanCmd.substring(commandType.length + 1);
         elements.push({
           id: def.id,
           type: 'text',
@@ -222,7 +224,7 @@ export function parseTPCL(tpcl: string): LabelTemplate {
           font: def.font,
           width: def.width,
           height: def.height,
-          content: parts[1]
+          content: content
         });
       }
     } else if (commandType.startsWith('XB')) {
@@ -238,6 +240,8 @@ export function parseTPCL(tpcl: string): LabelTemplate {
       const def = barcodeDefs.get(xbId);
       if (def) {
         const params = def.params;
+        // Content starts after the first semicolon
+        const content = cleanCmd.substring(commandType.length + 1);
         // Distinguish QR vs Barcode
         // QR usually has 'T' as 3rd param (index 2)
         if (params.length === 7 && params[2] === 'T') {
@@ -249,7 +253,7 @@ export function parseTPCL(tpcl: string): LabelTemplate {
              y: parseInt(params[1]),
              rotation: parseInt(params[6]),
              size: parseInt(params[4]),
-             content: parts[1],
+             content: content,
              qrType: params[2],
              errorCorrection: params[3],
              mode: params[5]
@@ -266,7 +270,7 @@ export function parseTPCL(tpcl: string): LabelTemplate {
              width: parseInt(params[4]),
              height: parseInt(params[6]),
              ratio: '3',
-             content: parts[1]
+             content: content
            });
         }
       }

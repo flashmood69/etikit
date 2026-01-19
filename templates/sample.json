@@ -1,0 +1,313 @@
+{
+  "name": "Sample",
+  "width": 104,
+  "height": 63,
+  "elements": [
+    {
+      "id": "PC022",
+      "type": "text",
+      "x": 245,
+      "y": 355,
+      "rotation": 0,
+      "content": "26018011/5",
+      "font": "Q",
+      "width": 10,
+      "height": 10
+    },
+    {
+      "id": "PC001",
+      "type": "text",
+      "x": 253,
+      "y": 230,
+      "rotation": 0,
+      "content": "Requested Quantity",
+      "font": "G",
+      "width": 10,
+      "height": 10
+    },
+    {
+      "id": "PC002",
+      "type": "text",
+      "x": 253,
+      "y": 286,
+      "rotation": 0,
+      "content": "30,21 kg",
+      "font": "H",
+      "width": 10,
+      "height": 10
+    },
+    {
+      "id": "PC005",
+      "type": "text",
+      "x": 253,
+      "y": 37,
+      "rotation": 0,
+      "content": "ABC012345",
+      "font": "H",
+      "width": 10,
+      "height": 10
+    },
+    {
+      "id": "PC007",
+      "type": "text",
+      "x": 863,
+      "y": 235,
+      "rotation": 0,
+      "content": "18/01/2026",
+      "font": "G",
+      "width": 10,
+      "height": 10
+    },
+    {
+      "id": "PC008",
+      "type": "text",
+      "x": 863,
+      "y": 188,
+      "rotation": 0,
+      "content": "Date",
+      "font": "G",
+      "width": 10,
+      "height": 10
+    },
+    {
+      "id": "PC009",
+      "type": "text",
+      "x": 253,
+      "y": 482,
+      "rotation": 0,
+      "content": "5/6 Beacker",
+      "font": "G",
+      "width": 10,
+      "height": 10
+    },
+    {
+      "id": "PC010",
+      "type": "text",
+      "x": 253,
+      "y": 532,
+      "rotation": 0,
+      "content": "0,57399 kg",
+      "font": "Q",
+      "width": 10,
+      "height": 10
+    },
+    {
+      "id": "PC011",
+      "type": "text",
+      "x": 433,
+      "y": 584,
+      "rotation": 0,
+      "content": "",
+      "font": "R",
+      "width": 10,
+      "height": 10
+    },
+    {
+      "id": "PC012",
+      "type": "text",
+      "x": 33,
+      "y": 584,
+      "rotation": 0,
+      "content": "MWS 05 ",
+      "font": "H",
+      "width": 10,
+      "height": 10
+    },
+    {
+      "id": "PC013",
+      "type": "text",
+      "x": 245,
+      "y": 422,
+      "rotation": 0,
+      "content": "",
+      "font": "H",
+      "width": 10,
+      "height": 10
+    },
+    {
+      "id": "PC014",
+      "type": "text",
+      "x": 253,
+      "y": 180,
+      "rotation": 0,
+      "content": "VERS. 01",
+      "font": "G",
+      "width": 10,
+      "height": 10
+    },
+    {
+      "id": "PC015",
+      "type": "text",
+      "x": 253,
+      "y": 211,
+      "rotation": 0,
+      "font": "G",
+      "width": 10,
+      "height": 10
+    },
+    {
+      "id": "PC016",
+      "type": "text",
+      "x": 253,
+      "y": 84,
+      "rotation": 0,
+      "content": "SIERRA BRAVO TANGO",
+      "font": "G",
+      "width": 10,
+      "height": 10
+    },
+    {
+      "id": "PC017",
+      "type": "text",
+      "x": 253,
+      "y": 134,
+      "rotation": 0,
+      "content": "000100000123",
+      "font": "R",
+      "width": 10,
+      "height": 10
+    },
+    {
+      "id": "PC018",
+      "type": "text",
+      "x": 840,
+      "y": 40,
+      "rotation": 0,
+      "content": "A260000123",
+      "font": "G",
+      "width": 10,
+      "height": 10
+    },
+    {
+      "id": "PC019",
+      "type": "text",
+      "x": 603,
+      "y": 408,
+      "rotation": 0,
+      "content": "",
+      "font": "G",
+      "width": 10,
+      "height": 10
+    },
+    {
+      "id": "PC020",
+      "type": "text",
+      "x": 603,
+      "y": 447,
+      "rotation": 0,
+      "content": "",
+      "font": "G",
+      "width": 10,
+      "height": 10
+    },
+    {
+      "id": "PC021",
+      "type": "text",
+      "x": 800,
+      "y": 555,
+      "rotation": 0,
+      "content": "J.DOE",
+      "font": "G",
+      "width": 10,
+      "height": 10
+    },
+    {
+      "id": "XB00",
+      "type": "barcode",
+      "x": 36,
+      "y": 460,
+      "rotation": 3,
+      "content": "26018011/5",
+      "barcodeType": "9",
+      "height": 200,
+      "width": 3,
+      "ratio": "3",
+      "checkDigitControl": "3",
+      "sequentialValue": "+0000000000",
+      "degreeRotation": "000",
+      "selectionOfCheckDigit": "0",
+      "selectionOfFont": "00"
+    },
+    {
+      "id": "XB01",
+      "type": "qrcode",
+      "x": 800,
+      "y": 150,
+      "rotation": 1,
+      "content": "000100000123",
+      "size": 5,
+      "qrType": "T",
+      "errorCorrection": "H",
+      "mode": "A"
+    },
+    {
+      "id": "XB02",
+      "type": "qrcode",
+      "x": 1010,
+      "y": 55,
+      "rotation": 1,
+      "content": "ABC012345-VERS. 01",
+      "size": 3,
+      "qrType": "T",
+      "errorCorrection": "H",
+      "mode": "A"
+    },
+    {
+      "id": "XR01",
+      "type": "rectangle",
+      "x": 241,
+      "y": 0,
+      "width": 10,
+      "height": 354,
+      "rotation": 0,
+      "thickness": 1
+    },
+    {
+      "id": "XR02",
+      "type": "rectangle",
+      "x": 589,
+      "y": 306,
+      "width": 9,
+      "height": 190,
+      "rotation": 0,
+      "thickness": 1
+    },
+    {
+      "id": "LC01",
+      "type": "line",
+      "x": 842,
+      "y": 136,
+      "x2": 842,
+      "y2": 306,
+      "rotation": 0,
+      "thickness": 3
+    },
+    {
+      "id": "LC02",
+      "type": "line",
+      "x": 241,
+      "y": 304,
+      "x2": 596,
+      "y2": 304,
+      "rotation": 0,
+      "thickness": 5
+    },
+    {
+      "id": "LC03",
+      "type": "line",
+      "x": 590,
+      "y": 496,
+      "x2": 1020,
+      "y2": 496,
+      "rotation": 0,
+      "thickness": 7
+    }
+  ],
+  "printSettings": {
+    "issueMode": "I",
+    "quantity": 1,
+    "speed": "C",
+    "sensor": "5",
+    "statusResponse": "200"
+  }
+}

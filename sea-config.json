@@ -1,0 +1,7 @@
+{
+  "main": "build/index.js",
+  "output": "build/sea-prep.blob",
+  "disableSentinel": false,
+  "useCodeCache": true,
+  "useSnapshot": false
+}

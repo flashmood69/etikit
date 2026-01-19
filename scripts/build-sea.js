@@ -91,6 +91,7 @@ fs.copyFileSync(process.execPath, exePath);
 
 // 8. Inject the blob into the executable
 console.log('Injecting blob into executable...');
+console.log('(Note: You may see a "signature seems corrupted" warning; this is expected when modifying the Node binary)');
 run('npx', [
   'postject',
   exePath,

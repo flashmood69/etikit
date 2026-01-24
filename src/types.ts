@@ -1,5 +1,5 @@
-export const COORDS_PER_MM = 10; // TPCL coordinates are always in 0.1mm units
-export const DOTS_PER_MM = 8;   // Printer resolution (203 DPI = 8 dots/mm)
+export const COORDS_PER_MM = 10;
+export const DOTS_PER_MM = 8;
 
 export type ElementType = 'text' | 'barcode' | 'qrcode' | 'line' | 'rectangle';
 
@@ -14,32 +14,28 @@ export interface BaseElement {
 export interface TextElement extends BaseElement {
   type: 'text';
   content?: string;
-  font: string;
-  width: number;
-  height: number;
+  fontFamily: string;
+  fontSizePt: number;
+  fontWeight?: 'normal' | 'bold';
+  fontStyle?: 'normal' | 'italic';
+  width: number; // Magnification or scale
+  height: number; // Magnification or scale
 }
 
 export interface BarcodeElement extends BaseElement {
   type: 'barcode';
   content?: string;
-  barcodeType: string;
+  barcodeType: string; // Generic type like 'code128', 'ean13'
   height: number;
-  width: number;
-  ratio: string;
-  checkDigitControl?: string;
-  sequentialValue?: string;
-  degreeRotation?: string;
-  selectionOfCheckDigit?: string;
-  selectionOfFont?: string;
+  width: number; // Narrow bar width
+  showText?: boolean;
 }
 
 export interface QRCodeElement extends BaseElement {
   type: 'qrcode';
   content?: string;
-  qrType?: string;
-  errorCorrection?: string;
   size: number;
-  mode?: string;
+  errorCorrection?: 'L' | 'M' | 'Q' | 'H';
 }
 
 export interface LineElement extends BaseElement {
@@ -59,17 +55,21 @@ export interface RectangleElement extends BaseElement {
 export type LabelElement = TextElement | BarcodeElement | QRCodeElement | LineElement | RectangleElement;
 
 export interface PrintSettings {
-  issueMode: string;
   quantity: number;
-  speed?: string;
-  sensor?: string;
-  statusResponse?: string;
+  speed?: number;
+  darkness?: number;
 }
 
 export interface LabelTemplate {
   name: string;
-  width: number; // in dots or mm? usually dots for TPCL
-  height: number;
+  width: number; // mm
+  height: number; // mm
   elements: LabelElement[];
   printSettings?: PrintSettings;
+}
+
+export interface LabelDriver {
+  generate(label: LabelTemplate): string;
+  parse(content: string): LabelTemplate;
+  supportedExtensions: string[];
 }

@@ -6,34 +6,54 @@ import { twMerge } from 'tailwind-merge'
 import Barcode from 'react-barcode'
 import { QRCodeSVG } from 'qrcode.react'
 import { LabelElement, ElementType, TextElement, BarcodeElement, QRCodeElement, LineElement, RectangleElement, LabelTemplate, DOTS_PER_MM, COORDS_PER_MM, PrintSettings } from './types'
-import { generateTPCL, parseTPCL } from './tpcl'
+import { drivers, getDriverForFile } from './drivers'
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-const FONT_MAP: Record<string, { family: string, pt: number, weight?: number | string, style?: string }> = {
-  'A': { family: '"Times New Roman", Times, serif', pt: 8 },
-  'B': { family: '"Times New Roman", Times, serif', pt: 10 },
-  'C': { family: '"Times New Roman", Times, serif', pt: 10, weight: 'bold' },
-  'D': { family: '"Times New Roman", Times, serif', pt: 12, weight: 'bold' },
-  'E': { family: '"Times New Roman", Times, serif', pt: 14, weight: 'bold' },
-  'F': { family: '"Times New Roman", Times, serif', pt: 12, style: 'italic' },
-  'G': { family: 'Helvetica, Arial, sans-serif', pt: 6 },
-  'H': { family: 'Helvetica, Arial, sans-serif', pt: 10 },
-  'I': { family: 'Helvetica, Arial, sans-serif', pt: 12 },
-  'J': { family: 'Helvetica, Arial, sans-serif', pt: 12, weight: 'bold' },
-  'K': { family: 'Helvetica, Arial, sans-serif', pt: 14, weight: 'bold' },
-  'L': { family: 'Helvetica, Arial, sans-serif', pt: 12, style: 'italic' },
-  'M': { family: 'Helvetica, Arial, sans-serif', pt: 18, weight: 'bold' },
-  'N': { family: '"Courier New", Courier, monospace', pt: 9.5 },
-  'O': { family: '"Courier New", Courier, monospace', pt: 7 },
-  'P': { family: '"Courier New", Courier, monospace', pt: 10 },
-  'Q': { family: '"Courier New", Courier, monospace', pt: 10 },
-  'R': { family: '"Courier New", Courier, monospace', pt: 12, weight: 'bold' },
-  'S': { family: 'monospace', pt: 12 },
-  'T': { family: 'monospace', pt: 12 },
-};
+const FONT_FAMILY_CSS: Record<string, string> = {
+  times: '"Times New Roman", Times, serif',
+  helvetica: 'Helvetica, Arial, sans-serif',
+  courier: '"Courier New", Courier, monospace',
+  presentation: '"Arial Black", Arial, sans-serif',
+  'letter-gothic': '"Courier New", Courier, monospace',
+  'prestige-elite': '"Courier New", Courier, monospace',
+  'ocr-a': '"OCR A Std", "OCR A", monospace',
+  'ocr-b': '"OCR B Std", "OCR B", monospace'
+}
+
+type FontPreset = {
+  key: string;
+  label: string;
+  fontFamily: string;
+  fontSizePt: number;
+  fontWeight: 'normal' | 'bold';
+  fontStyle: 'normal' | 'italic';
+}
+
+const FONT_PRESETS: FontPreset[] = [
+  { key: 'A', label: 'Times Roman 8pt Medium', fontFamily: 'times', fontSizePt: 8, fontWeight: 'normal', fontStyle: 'normal' },
+  { key: 'B', label: 'Times Roman 10pt Medium', fontFamily: 'times', fontSizePt: 10, fontWeight: 'normal', fontStyle: 'normal' },
+  { key: 'C', label: 'Times Roman 10pt Bold', fontFamily: 'times', fontSizePt: 10, fontWeight: 'bold', fontStyle: 'normal' },
+  { key: 'D', label: 'Times Roman 12pt Bold', fontFamily: 'times', fontSizePt: 12, fontWeight: 'bold', fontStyle: 'normal' },
+  { key: 'E', label: 'Times Roman 14pt Bold', fontFamily: 'times', fontSizePt: 14, fontWeight: 'bold', fontStyle: 'normal' },
+  { key: 'F', label: 'Times Roman 12pt Italic', fontFamily: 'times', fontSizePt: 12, fontWeight: 'normal', fontStyle: 'italic' },
+  { key: 'G', label: 'Helvetica 6pt Medium', fontFamily: 'helvetica', fontSizePt: 6, fontWeight: 'normal', fontStyle: 'normal' },
+  { key: 'H', label: 'Helvetica 10pt Medium', fontFamily: 'helvetica', fontSizePt: 10, fontWeight: 'normal', fontStyle: 'normal' },
+  { key: 'I', label: 'Helvetica 12pt Medium', fontFamily: 'helvetica', fontSizePt: 12, fontWeight: 'normal', fontStyle: 'normal' },
+  { key: 'J', label: 'Helvetica 12pt Bold', fontFamily: 'helvetica', fontSizePt: 12, fontWeight: 'bold', fontStyle: 'normal' },
+  { key: 'K', label: 'Helvetica 14pt Bold', fontFamily: 'helvetica', fontSizePt: 14, fontWeight: 'bold', fontStyle: 'normal' },
+  { key: 'L', label: 'Helvetica 12pt Italic', fontFamily: 'helvetica', fontSizePt: 12, fontWeight: 'normal', fontStyle: 'italic' },
+  { key: 'M', label: 'Presentation Bold 18pt', fontFamily: 'presentation', fontSizePt: 18, fontWeight: 'bold', fontStyle: 'normal' },
+  { key: 'N', label: 'Letter Gothic 9.5pt', fontFamily: 'letter-gothic', fontSizePt: 9.5, fontWeight: 'normal', fontStyle: 'normal' },
+  { key: 'O', label: 'Prestige Elite 7pt', fontFamily: 'prestige-elite', fontSizePt: 7, fontWeight: 'normal', fontStyle: 'normal' },
+  { key: 'P', label: 'Prestige Elite 10pt', fontFamily: 'prestige-elite', fontSizePt: 10, fontWeight: 'normal', fontStyle: 'normal' },
+  { key: 'Q', label: 'Courier 10pt', fontFamily: 'courier', fontSizePt: 10, fontWeight: 'normal', fontStyle: 'normal' },
+  { key: 'R', label: 'Courier Bold 12pt', fontFamily: 'courier', fontSizePt: 12, fontWeight: 'bold', fontStyle: 'normal' },
+  { key: 'S', label: 'OCR-A 12pt', fontFamily: 'ocr-a', fontSizePt: 12, fontWeight: 'normal', fontStyle: 'normal' },
+  { key: 'T', label: 'OCR-B 12pt', fontFamily: 'ocr-b', fontSizePt: 12, fontWeight: 'normal', fontStyle: 'normal' }
+]
 
 const normalizeTextScale = (val: number) => (val >= 10 ? val / 10 : (val <= 0 ? 1 : val));
 
@@ -42,11 +62,10 @@ const TEXT_FONT_SIZE_SCALE = 1.4;
 const textMetricsCache = new Map<string, { ascent: number; descent: number }>();
 
 function getTextFontStyle(textEl: TextElement, zoom: number) {
-  const fontConfig = FONT_MAP[textEl.font] || FONT_MAP['G'];
-  const fontWeight = fontConfig.weight || 'normal';
-  const fontStyle = fontConfig.style || 'normal';
-  const fontSizePx = fontConfig.pt * MM_PER_PT * zoom * TEXT_FONT_SIZE_SCALE;
-  const fontFamily = fontConfig.family;
+  const fontFamily = FONT_FAMILY_CSS[textEl.fontFamily] || FONT_FAMILY_CSS.helvetica;
+  const fontWeight = textEl.fontWeight || 'normal';
+  const fontStyle = textEl.fontStyle || 'normal';
+  const fontSizePx = (textEl.fontSizePt || 10) * MM_PER_PT * zoom * TEXT_FONT_SIZE_SCALE;
   return { fontSizePx, fontWeight, fontStyle, fontFamily };
 }
 
@@ -145,17 +164,38 @@ function App() {
   const [labelSize, setLabelSize] = useState({ width: 104, height: 63 });
   const [labelName, setLabelName] = useState('Untitled');
   const [zoom, setZoom] = useState(4); // 1mm = 4px
+  const [exportFormat, setExportFormat] = useState<'tpcl' | 'zpl'>('tpcl')
   const [printSettings, setPrintSettings] = useState<PrintSettings>({
-    issueMode: 'I',
     quantity: 1,
-    speed: 'C',
-    sensor: '5',
-    statusResponse: '200'
+    speed: 3,
+    darkness: 10
   });
 
   const effectiveHeightMm = Math.max(1, labelSize.height - 3);
   
   const selectedElement = elements.find(el => el.id === selectedId);
+  const getFontPresetKey = (textEl: TextElement) => {
+    const fontWeight = textEl.fontWeight || 'normal';
+    const fontStyle = textEl.fontStyle || 'normal';
+    const match = FONT_PRESETS.find(p =>
+      p.fontFamily === textEl.fontFamily &&
+      p.fontSizePt === textEl.fontSizePt &&
+      p.fontWeight === fontWeight &&
+      p.fontStyle === fontStyle
+    );
+    return match?.key ?? 'G';
+  };
+
+  const applyFontPreset = (id: string, presetKey: string) => {
+    const preset = FONT_PRESETS.find(p => p.key === presetKey);
+    if (!preset) return;
+    updateElement(id, {
+      fontFamily: preset.fontFamily,
+      fontSizePt: preset.fontSizePt,
+      fontWeight: preset.fontWeight,
+      fontStyle: preset.fontStyle
+    } as any);
+  };
 
   const addElement = (type: ElementType) => {
     const id = Math.random().toString(36).substr(2, 9);
@@ -171,10 +211,10 @@ function App() {
 
     switch (type) {
       case 'text':
-        newElement = { ...base, type: 'text', content: 'New Text', font: 'G', width: 10, height: 10 } as TextElement;
+        newElement = { ...base, type: 'text', content: 'New Text', fontFamily: 'helvetica', fontSizePt: 10, fontWeight: 'normal', fontStyle: 'normal', width: 10, height: 10 } as TextElement;
         break;
       case 'barcode':
-        newElement = { ...base, type: 'barcode', content: '12345678', barcodeType: '9', height: 100, width: 3, ratio: '3' } as BarcodeElement;
+        newElement = { ...base, type: 'barcode', content: '12345678', barcodeType: 'code128', height: 100, width: 3 } as BarcodeElement;
         break;
       case 'qrcode':
         newElement = { ...base, type: 'qrcode', content: '12345678', size: 5 } as QRCodeElement;
@@ -224,7 +264,7 @@ function App() {
     updateElement(id, { x, y });
   };
 
-  const exportTPCL = () => {
+  const exportLabel = (protocol: string) => {
     const template: LabelTemplate = {
       name: labelName,
       width: labelSize.width,
@@ -232,23 +272,33 @@ function App() {
       elements,
       printSettings
     };
-    const tpcl = generateTPCL(template);
     
-    // Convert string to Windows-1252 bytes for TPCL printer compatibility
-    // Most TPCL printers expect 8-bit encoding (like Windows-1252 or ISO-8859-1)
-    const bytes = new Uint8Array(tpcl.length);
-    for (let i = 0; i < tpcl.length; i++) {
-      const charCode = tpcl.charCodeAt(i);
-      // Basic mapping for Windows-1252 / ISO-8859-1 characters (0-255)
-      // For characters > 255, we'd need a full mapping table, but 0-255 covers most accented chars
-      bytes[i] = charCode <= 255 ? charCode : 63; // 63 is '?'
+    const driver = drivers[protocol.toLowerCase()];
+    if (!driver) {
+      alert(`Driver for ${protocol} not found`);
+      return;
+    }
+
+    const output = driver.generate(template);
+    
+    // Convert string to bytes. TPCL might need Windows-1252, ZPL might need UTF-8.
+    // For now, we'll use a basic mapping or TextEncoder.
+    let bytes: Uint8Array;
+    if (protocol.toLowerCase() === 'tpcl') {
+      bytes = new Uint8Array(output.length);
+      for (let i = 0; i < output.length; i++) {
+        const charCode = output.charCodeAt(i);
+        bytes[i] = charCode <= 255 ? charCode : 63;
+      }
+    } else {
+      bytes = new TextEncoder().encode(output);
     }
     
-    const blob = new Blob([bytes], { type: 'text/plain' });
+    const blob = new Blob([bytes as any], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${labelName}.txt`;
+    a.download = `${labelName}${driver.supportedExtensions[0]}`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -282,58 +332,49 @@ function App() {
         let content = '';
         let template: LabelTemplate | null = null;
 
-        // Try UTF-8 first
+        // Try JSON first
         try {
           const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
           content = utf8Decoder.decode(buffer);
           try {
-            template = JSON.parse(content) as LabelTemplate;
-            if (!template.elements || !Array.isArray(template.elements)) {
-              template = null;
+            const parsed = JSON.parse(content);
+            if (parsed.elements && Array.isArray(parsed.elements)) {
+              template = parsed as LabelTemplate;
             }
           } catch (e) {
-            template = null;
+            // Not JSON
           }
         } catch (e) {
-          // Not valid UTF-8, will try windows-1252
+          // Not UTF-8
         }
 
-        // If UTF-8/JSON failed, try windows-1252 and TPCL
+        // If not JSON, try drivers
         if (!template) {
-          const win1252Decoder = new TextDecoder('windows-1252');
-          content = win1252Decoder.decode(buffer);
-          try {
-            template = parseTPCL(content);
-          } catch (tpclErr) {
-            console.error('TPCL parse failed:', tpclErr);
+          const driver = getDriverForFile(file.name);
+          if (driver) {
+            // Try different encodings for drivers
+            try {
+              const win1252Decoder = new TextDecoder('windows-1252');
+              content = win1252Decoder.decode(buffer);
+              template = driver.parse(content);
+            } catch (err) {
+              const utf8Decoder = new TextDecoder('utf-8');
+              content = utf8Decoder.decode(buffer);
+              template = driver.parse(content);
+            }
           }
         }
 
         if (template && template.elements && Array.isArray(template.elements)) {
-          const normalizedElements = template.elements.map((el) => {
-            if (el.type === 'text') {
-              const width = el.width < 10 ? Math.round(el.width * 10) : el.width;
-              const height = el.height < 10 ? Math.round(el.height * 10) : el.height;
-              return { ...el, width, height } as LabelElement;
-            }
-            if (el.type === 'qrcode') {
-              if (el.size > 20) {
-                const sizeMm = el.size / DOTS_PER_MM;
-                const tpclSize = Math.max(1, Math.min(20, Math.round(sizeMm / 3.5)));
-                return { ...el, size: tpclSize } as LabelElement;
-              }
-              return el as LabelElement;
-            }
-            return el as LabelElement;
-          });
-
-          setElements(normalizedElements);
+          setElements(template.elements);
           setLabelSize({ width: template.width, height: template.height });
           setLabelName(template.name || 'Untitled');
           if (template.printSettings) {
             setPrintSettings(template.printSettings);
           }
           setSelectedId(null);
+        } else {
+          alert('Could not parse file');
         }
       } catch (err) {
         console.error('Failed to parse template:', err);
@@ -376,10 +417,20 @@ function App() {
             <Save size={16} />
             Save
           </button>
-          <button onClick={exportTPCL} className="flex items-center gap-2 rounded-md bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 shadow-sm transition-all active:scale-95 ml-2">
-            <FileDown size={16} />
-            Export TPCL
-          </button>
+          <div className="flex items-center gap-2 ml-2">
+            <select
+              className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+              value={exportFormat}
+              onChange={(e) => setExportFormat(e.target.value as 'tpcl' | 'zpl')}
+            >
+              <option value="tpcl">TPCL</option>
+              <option value="zpl">ZPL</option>
+            </select>
+            <button onClick={() => exportLabel(exportFormat)} className="flex items-center gap-2 rounded-md bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 shadow-sm transition-all active:scale-95">
+              <FileDown size={16} />
+              Export
+            </button>
+          </div>
         </div>
       </header>
 
@@ -513,35 +564,12 @@ function App() {
                       <label className="text-[10px] font-bold text-slate-400 uppercase">Font</label>
                       <select 
                         className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
-                        value={selectedElement.font}
-                        onChange={(e) => updateElement(selectedElement.id, { font: e.target.value })}
+                        value={getFontPresetKey(selectedElement as TextElement)}
+                        onChange={(e) => applyFontPreset(selectedElement.id, e.target.value)}
                       >
-                        <optgroup label="Times Roman">
-                          <option value="A">A (8pt Medium)</option>
-                          <option value="B">B (10pt Medium)</option>
-                          <option value="C">C (10pt Bold)</option>
-                          <option value="D">D (12pt Bold)</option>
-                          <option value="E">E (14pt Bold)</option>
-                          <option value="F">F (12pt Italic)</option>
-                        </optgroup>
-                        <optgroup label="Helvetica">
-                          <option value="G">G (6pt Medium)</option>
-                          <option value="H">H (10pt Medium)</option>
-                          <option value="I">I (12pt Medium)</option>
-                          <option value="J">J (12pt Bold)</option>
-                          <option value="K">K (14pt Bold)</option>
-                          <option value="L">L (12pt Italic)</option>
-                        </optgroup>
-                        <optgroup label="Others">
-                          <option value="M">M (Presentation Bold 18pt)</option>
-                          <option value="N">N (Letter Gothic 9.5pt)</option>
-                          <option value="O">O (Prestige Elite 7pt)</option>
-                          <option value="P">P (Prestige Elite 10pt)</option>
-                          <option value="Q">Q (Courier 10pt)</option>
-                          <option value="R">R (Courier Bold 12pt)</option>
-                          <option value="S">S (OCR-A 12pt)</option>
-                          <option value="T">T (OCR-B 12pt)</option>
-                        </optgroup>
+                        {FONT_PRESETS.map(p => (
+                          <option key={p.key} value={p.key}>{p.label}</option>
+                        ))}
                       </select>
                     </div>
                     <PropertyGrid>
@@ -581,10 +609,12 @@ function App() {
                         value={selectedElement.barcodeType}
                         onChange={(e) => updateElement(selectedElement.id, { barcodeType: e.target.value })}
                       >
-                        <option value="9">CODE 128</option>
-                        <option value="5">CODE 39</option>
-                        <option value="3">EAN-13</option>
-                        <option value="2">EAN-8</option>
+                        <option value="code128">CODE 128</option>
+                        <option value="code39">CODE 39</option>
+                        <option value="ean13">EAN-13</option>
+                        <option value="ean8">EAN-8</option>
+                        <option value="upca">UPC-A</option>
+                        <option value="upce">UPC-E</option>
                       </select>
                     </div>
                     <PropertyGrid>
@@ -711,20 +741,8 @@ function App() {
               />
             </PropertyGrid>
 
-            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-6 mb-4">Print Settings (XS)</h3>
+            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-6 mb-4">Print Settings</h3>
             <div className="space-y-4">
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-bold text-slate-400 uppercase">Issue Mode</label>
-                <select 
-                  className="w-full rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
-                  value={printSettings.issueMode}
-                  onChange={(e) => setPrintSettings({ ...printSettings, issueMode: e.target.value })}
-                >
-                  <option value="I">I (Batch)</option>
-                  <option value="C">C (Cut)</option>
-                  <option value="D">D (Strip)</option>
-                </select>
-              </div>
               <PropertyInput 
                 label="Quantity" 
                 value={printSettings.quantity} 
@@ -733,33 +751,20 @@ function App() {
                 step={1}
               />
               <PropertyGrid>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase">Speed</label>
-                  <select 
-                    className="w-full rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
-                    value={printSettings.speed}
-                    onChange={(e) => setPrintSettings({ ...printSettings, speed: e.target.value })}
-                  >
-                    <option value="A">A (Slowest)</option>
-                    <option value="B">B</option>
-                    <option value="C">C (Normal)</option>
-                    <option value="D">D</option>
-                    <option value="E">E (Fastest)</option>
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase">Sensor</label>
-                  <select 
-                    className="w-full rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
-                    value={printSettings.sensor}
-                    onChange={(e) => setPrintSettings({ ...printSettings, sensor: e.target.value })}
-                  >
-                    <option value="0">None</option>
-                    <option value="1">Reflective</option>
-                    <option value="2">Transmissive</option>
-                    <option value="5">Auto</option>
-                  </select>
-                </div>
+                <PropertyInput 
+                  label="Speed" 
+                  value={printSettings.speed ?? 3} 
+                  onChange={(val) => setPrintSettings({ ...printSettings, speed: parseInt(val) || 3 })}
+                  type="number"
+                  step={1}
+                />
+                <PropertyInput 
+                  label="Darkness" 
+                  value={printSettings.darkness ?? 10} 
+                  onChange={(val) => setPrintSettings({ ...printSettings, darkness: parseInt(val) || 10 })}
+                  type="number"
+                  step={1}
+                />
               </PropertyGrid>
             </div>
           </div>

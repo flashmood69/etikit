@@ -61,6 +61,47 @@ const MM_PER_PT = 25.4 / 72;
 const TEXT_FONT_SIZE_SCALE = 1.4;
 const textMetricsCache = new Map<string, { ascent: number; descent: number }>();
 
+function formatMm(value: number) {
+  if (!Number.isFinite(value)) return String(value)
+  const rounded = Math.round(value * 10) / 10
+  return rounded % 1 === 0 ? String(Math.round(rounded)) : rounded.toFixed(1)
+}
+
+function roundMm(value: number) {
+  if (!Number.isFinite(value)) return value
+  return Math.round(value * 10) / 10
+}
+
+type LabelSizePreset = {
+  id: string
+  widthMm: number
+  heightMm: number
+}
+
+const DEFAULT_LABEL_SIZE_PRESET_ID = '102x76'
+const LABEL_SIZE_PRESETS: LabelSizePreset[] = [
+  { id: '102x76', widthMm: 102, heightMm: 76 },
+  { id: '102x152', widthMm: 102, heightMm: 152 },
+  { id: '100x150', widthMm: 100, heightMm: 150 },
+  { id: '102x51', widthMm: 102, heightMm: 51 },
+  { id: '76x51', widthMm: 76, heightMm: 51 },
+  { id: '70x50', widthMm: 70, heightMm: 50 },
+  { id: '58x40', widthMm: 58, heightMm: 40 },
+  { id: '50x25', widthMm: 50, heightMm: 25 },
+  { id: '38x25', widthMm: 38, heightMm: 25 },
+]
+
+function formatInches(valueMm: number) {
+  if (!Number.isFinite(valueMm)) return String(valueMm)
+  const inches = valueMm / 25.4
+  const rounded = Math.round(inches * 10) / 10
+  return rounded % 1 === 0 ? String(Math.round(rounded)) : rounded.toFixed(1)
+}
+
+function formatLabelSizePreset(preset: LabelSizePreset) {
+  return `${formatMm(preset.widthMm)} × ${formatMm(preset.heightMm)} mm (${formatInches(preset.widthMm)}" × ${formatInches(preset.heightMm)}")`
+}
+
 function getTextFontStyle(textEl: TextElement, zoom: number) {
   const fontFamily = FONT_FAMILY_CSS[textEl.fontFamily] || FONT_FAMILY_CSS.helvetica;
   const fontWeight = textEl.fontWeight || 'normal';
@@ -161,17 +202,19 @@ function getElementSize(element: LabelElement, zoom: number) {
 function App() {
   const [elements, setElements] = useState<LabelElement[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [labelSize, setLabelSize] = useState({ width: 104, height: 63 });
+  const [labelSize, setLabelSize] = useState({ width: 102, height: 76 });
   const [labelName, setLabelName] = useState('Untitled');
   const [zoom, setZoom] = useState(4); // 1mm = 4px
+  const [isAutoZoom, setIsAutoZoom] = useState(false);
   const [exportFormat, setExportFormat] = useState<'tpcl' | 'zpl'>('tpcl')
   const [printSettings, setPrintSettings] = useState<PrintSettings>({
     quantity: 1,
     speed: 3,
     darkness: 10
   });
-
-  const effectiveHeightMm = Math.max(1, labelSize.height - 3);
+  const [isNewConfirmOpen, setIsNewConfirmOpen] = useState(false);
+  const [newLabelPresetId, setNewLabelPresetId] = useState(DEFAULT_LABEL_SIZE_PRESET_ID);
+  const editorViewportRef = useRef<HTMLDivElement | null>(null);
   
   const selectedElement = elements.find(el => el.id === selectedId);
   const getFontPresetKey = (textEl: TextElement) => {
@@ -263,6 +306,36 @@ function App() {
     const y = Math.round(data.y / zoom * COORDS_PER_MM);
     updateElement(id, { x, y });
   };
+
+  useEffect(() => {
+    if (!isAutoZoom) return;
+    const el = editorViewportRef.current;
+    if (!el) return;
+
+    const compute = () => {
+      const paddingPx = 32;
+      const availableWidthPx = Math.max(0, el.clientWidth - paddingPx);
+      const availableHeightPx = Math.max(0, el.clientHeight - paddingPx);
+      if (availableWidthPx <= 0 || availableHeightPx <= 0) return;
+
+      const next = Math.min(
+        availableWidthPx / labelSize.width,
+        availableHeightPx / labelSize.height
+      );
+      if (!Number.isFinite(next) || next <= 0) return;
+
+      const clamped = Math.min(10, Math.max(0.2, next));
+      const rounded = Math.round(clamped * 20) / 20;
+      setZoom((prev) => (Math.abs(prev - rounded) < 0.001 ? prev : rounded));
+    };
+
+    compute();
+    const ro = new ResizeObserver(() => {
+      requestAnimationFrame(compute);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [isAutoZoom, labelSize.width, labelSize.height]);
 
   const exportLabel = (protocol: string) => {
     const template: LabelTemplate = {
@@ -367,10 +440,15 @@ function App() {
 
         if (template && template.elements && Array.isArray(template.elements)) {
           setElements(template.elements);
-          setLabelSize({ width: template.width, height: template.height });
+          setLabelSize({ width: roundMm(template.width), height: roundMm(template.height) });
           setLabelName(template.name || 'Untitled');
           if (template.printSettings) {
             setPrintSettings(template.printSettings);
+          }
+          {
+            const lower = file.name.toLowerCase()
+            if (lower.endsWith('.zpl')) setExportFormat('zpl')
+            if (lower.endsWith('.tpcl') || lower.endsWith('.txt')) setExportFormat('tpcl')
           }
           setSelectedId(null);
         } else {
@@ -384,6 +462,15 @@ function App() {
     reader.readAsArrayBuffer(file);
     // Reset input
     e.target.value = '';
+  };
+
+  const resetToNew = (size?: { width: number; height: number }) => {
+    const nextSize = size ?? { width: 102, height: 76 }
+    setElements([]);
+    setSelectedId(null);
+    setLabelName('Untitled');
+    setLabelSize(nextSize);
+    setPrintSettings({ quantity: 1, speed: 3, darkness: 10 });
   };
 
   return (
@@ -404,14 +491,20 @@ function App() {
         </div>
         
         <div className="flex items-center gap-2">
-          <button onClick={() => setElements([])} className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50 transition-colors">
+          <button
+            onClick={() => {
+              setNewLabelPresetId(DEFAULT_LABEL_SIZE_PRESET_ID);
+              setIsNewConfirmOpen(true);
+            }}
+            className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50 transition-colors"
+          >
             <Plus size={16} />
             New
           </button>
           <label className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50 transition-colors cursor-pointer">
             <Upload size={16} />
             Load
-            <input type="file" accept=".json,.txt,.tpcl" className="hidden" onChange={loadTemplate} />
+            <input type="file" accept=".json,.txt,.tpcl,.zpl" className="hidden" onChange={loadTemplate} />
           </label>
           <button onClick={saveTemplate} className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50 transition-colors">
             <Save size={16} />
@@ -434,6 +527,62 @@ function App() {
         </div>
       </header>
 
+      {isNewConfirmOpen && (
+        <div
+          className="fixed inset-0 z-[1000] flex items-center justify-center bg-slate-900/40 p-4"
+          onMouseDown={() => setIsNewConfirmOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="w-full max-w-md rounded-xl border border-slate-200 bg-white shadow-2xl"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="p-5 border-b border-slate-100">
+              <div className="text-sm font-bold text-slate-900">Start a new label?</div>
+              <div className="mt-1 text-xs font-medium text-slate-500">
+                This will clear the current design.
+              </div>
+            </div>
+            <div className="p-5 border-b border-slate-100">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Label Size</label>
+              <select
+                className="mt-2 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                value={newLabelPresetId}
+                onChange={(e) => setNewLabelPresetId(e.target.value)}
+              >
+                {LABEL_SIZE_PRESETS.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {formatLabelSizePreset(preset)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="p-5 flex justify-end gap-2">
+              <button
+                onClick={() => setIsNewConfirmOpen(false)}
+                className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const preset =
+                    LABEL_SIZE_PRESETS.find((p) => p.id === newLabelPresetId) ??
+                    LABEL_SIZE_PRESETS.find((p) => p.id === DEFAULT_LABEL_SIZE_PRESET_ID) ??
+                    LABEL_SIZE_PRESETS[0];
+                  resetToNew({ width: preset.widthMm, height: preset.heightMm });
+                  setIsNewConfirmOpen(false);
+                }}
+                className="rounded-md bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 shadow-sm transition-all active:scale-95"
+              >
+                New
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-1 overflow-hidden">
         {/* Toolbar */}
         <aside className="w-16 border-r bg-white flex flex-col items-center py-6 gap-4 shadow-sm z-10 shrink-0">
@@ -450,44 +599,63 @@ function App() {
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-bold text-slate-400 uppercase">Zoom</span>
               <input 
-                type="range" min="1" max="10" step="0.5" 
-                value={zoom} onChange={(e) => setZoom(parseFloat(e.target.value))}
-                className="w-24 accent-blue-600"
+                type="range" min="0.2" max="10" step="0.05" 
+                value={zoom}
+                onChange={(e) => {
+                  setIsAutoZoom(false);
+                  setZoom(parseFloat(e.target.value));
+                }}
+                disabled={isAutoZoom}
+                className={cn("w-24 accent-blue-600", isAutoZoom && "opacity-50")}
               />
               <span className="text-xs font-mono w-8">{Math.round(zoom * 25)}%</span>
+              <button
+                type="button"
+                onClick={() => setIsAutoZoom((v) => !v)}
+                className={cn(
+                  "ml-1 rounded-md border px-2 py-1 text-[10px] font-bold uppercase tracking-widest transition-colors",
+                  isAutoZoom
+                    ? "border-blue-600 bg-blue-600 text-white hover:bg-blue-700"
+                    : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                )}
+              >
+                Auto
+              </button>
             </div>
             <div className="w-px h-4 bg-slate-200" />
             <div className="text-[10px] font-bold text-slate-400 uppercase">
-              {labelSize.width} x {effectiveHeightMm} mm
+              {formatMm(labelSize.width)} x {formatMm(labelSize.height)} mm
             </div>
           </div>
 
-          <div 
-            className="bg-white shadow-2xl border border-slate-300 relative transition-all duration-300" 
-            style={{ 
-              width: `${labelSize.width * zoom}px`, 
-              height: `${effectiveHeightMm * zoom}px`,
-            }}
-            onClick={() => setSelectedId(null)}
-          >
-            {/* Grid Pattern */}
-            <div className="absolute inset-0 opacity-[0.03] pointer-events-none" 
+          <div ref={editorViewportRef} className="w-full flex-1 min-h-0 flex items-start justify-center">
+            <div 
+              className="bg-white shadow-2xl border border-slate-300 relative transition-all duration-300 shrink-0" 
               style={{ 
-                backgroundImage: `radial-gradient(#000 1px, transparent 1px)`,
-                backgroundSize: `${zoom}px ${zoom}px`
-              }} 
-            />
-
-            {elements.map((el) => (
-              <DraggableElement 
-                key={el.id} 
-                element={el} 
-                zoom={zoom} 
-                isSelected={selectedId === el.id}
-                onSelect={() => setSelectedId(el.id)}
-                onDrag={(data) => handleDrag(el.id, data)}
+                width: `${labelSize.width * zoom}px`, 
+                height: `${labelSize.height * zoom}px`,
+              }}
+              onClick={() => setSelectedId(null)}
+            >
+              {/* Grid Pattern */}
+              <div className="absolute inset-0 opacity-[0.03] pointer-events-none" 
+                style={{ 
+                  backgroundImage: `radial-gradient(#000 1px, transparent 1px)`,
+                  backgroundSize: `${zoom}px ${zoom}px`
+                }} 
               />
-            ))}
+
+              {elements.map((el) => (
+                <DraggableElement 
+                  key={el.id} 
+                  element={el} 
+                  zoom={zoom} 
+                  isSelected={selectedId === el.id}
+                  onSelect={() => setSelectedId(el.id)}
+                  onDrag={(data) => handleDrag(el.id, data)}
+                />
+              ))}
+            </div>
           </div>
         </main>
 
@@ -576,16 +744,16 @@ function App() {
                       <PropertyInput 
                         label="Width Scale" 
                         value={selectedElement.width} 
-                        onChange={(val) => updateElement(selectedElement.id, { width: parseInt(val) })}
+                        onChange={(val) => updateElement(selectedElement.id, { width: parseFloat(val) })}
                         type="number"
-                        step={1}
+                        step={0.1}
                       />
                       <PropertyInput 
                         label="Height Scale" 
                         value={selectedElement.height} 
-                        onChange={(val) => updateElement(selectedElement.id, { height: parseInt(val) })}
+                        onChange={(val) => updateElement(selectedElement.id, { height: parseFloat(val) })}
                         type="number"
-                        step={1}
+                        step={0.1}
                       />
                     </PropertyGrid>
                   </>
@@ -727,17 +895,17 @@ function App() {
             <PropertyGrid>
               <PropertyInput 
                 label="Width (mm)" 
-                value={labelSize.width} 
-                onChange={(val) => setLabelSize({ ...labelSize, width: parseInt(val) })}
+                value={formatMm(labelSize.width)} 
+                onChange={(val) => setLabelSize({ ...labelSize, width: parseFloat(val) })}
                 type="number"
-                step={1}
+                step={0.1}
               />
               <PropertyInput 
                 label="Height (mm)" 
-                value={labelSize.height} 
-                onChange={(val) => setLabelSize({ ...labelSize, height: parseInt(val) })}
+                value={formatMm(labelSize.height)} 
+                onChange={(val) => setLabelSize({ ...labelSize, height: parseFloat(val) })}
                 type="number"
-                step={1}
+                step={0.1}
               />
             </PropertyGrid>
 

@@ -58,6 +58,7 @@ export interface PrintSettings {
   quantity: number;
   speed?: number;
   darkness?: number;
+  zplDotsPerMm?: number;
 }
 
 export interface LabelTemplate {

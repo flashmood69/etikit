@@ -73,7 +73,7 @@ const REVERSE_BARCODE_MAP: Record<string, string> = Object.fromEntries(
 );
 
 export class TPCLDriver implements LabelDriver {
-  supportedExtensions = ['.tpcl', '.txt'];
+  supportedExtensions = ['.etec'];
 
   generate(label: LabelTemplate): string {
     const lines: string[] = [];

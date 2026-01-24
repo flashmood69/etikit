@@ -447,8 +447,8 @@ function App() {
           }
           {
             const lower = file.name.toLowerCase()
-            if (lower.endsWith('.zpl')) setExportFormat('zpl')
-            if (lower.endsWith('.tpcl') || lower.endsWith('.txt')) setExportFormat('tpcl')
+            if (lower.endsWith('.ezpl')) setExportFormat('zpl')
+            if (lower.endsWith('.etec')) setExportFormat('tpcl')
           }
           setSelectedId(null);
         } else {
@@ -504,7 +504,7 @@ function App() {
           <label className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50 transition-colors cursor-pointer">
             <Upload size={16} />
             Load
-            <input type="file" accept=".json,.txt,.tpcl,.zpl" className="hidden" onChange={loadTemplate} />
+            <input type="file" accept=".json,.etec,.ezpl" className="hidden" onChange={loadTemplate} />
           </label>
           <button onClick={saveTemplate} className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50 transition-colors">
             <Save size={16} />

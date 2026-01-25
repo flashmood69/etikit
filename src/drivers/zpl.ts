@@ -8,11 +8,50 @@ import {
   LineElement,
   QRCodeElement,
   RectangleElement,
-  TextElement
+  TextElement,
+  Protocol,
+  FontMetadata,
+  BarcodeMetadata
 } from '../types'
 
+const ZPL_FONT_METADATA: FontMetadata[] = [
+  { key: '0', label: 'Scalable Triumvirate Bold Condensed', fontFamily: 'helvetica', fontSizePt: 10, fontWeight: 'bold', fontStyle: 'normal' },
+  { key: 'A', label: 'Standard', fontFamily: 'courier', fontSizePt: 5, fontWeight: 'normal', fontStyle: 'normal' },
+  { key: 'B', label: 'Bold', fontFamily: 'courier', fontSizePt: 7, fontWeight: 'bold', fontStyle: 'normal' },
+  { key: 'C', label: 'OCR-B', fontFamily: 'ocr-b', fontSizePt: 12, fontWeight: 'normal', fontStyle: 'normal' },
+  { key: 'D', label: 'OCR-A', fontFamily: 'ocr-a', fontSizePt: 10, fontWeight: 'normal', fontStyle: 'normal' },
+  { key: 'E', label: 'Sans Serif Medium', fontFamily: 'helvetica', fontSizePt: 12, fontWeight: 'normal', fontStyle: 'normal' },
+  { key: 'F', label: 'Sans Serif Bold', fontFamily: 'helvetica', fontSizePt: 14, fontWeight: 'bold', fontStyle: 'normal' },
+  { key: 'G', label: 'Sans Serif Extra Bold', fontFamily: 'helvetica', fontSizePt: 18, fontWeight: 'bold', fontStyle: 'normal' },
+  { key: 'H', label: 'Sans Serif Ultra Bold', fontFamily: 'helvetica', fontSizePt: 12, fontWeight: 'bold', fontStyle: 'normal' },
+  { key: 'P', label: 'Proportional', fontFamily: 'times-roman', fontSizePt: 10, fontWeight: 'normal', fontStyle: 'normal' },
+  { key: 'Q', label: 'Proportional Bold', fontFamily: 'times-roman', fontSizePt: 10, fontWeight: 'bold', fontStyle: 'normal' },
+  { key: 'R', label: 'Serif', fontFamily: 'times-roman', fontSizePt: 10, fontWeight: 'normal', fontStyle: 'normal' },
+  { key: 'S', label: 'Serif Bold', fontFamily: 'times-roman', fontSizePt: 10, fontWeight: 'bold', fontStyle: 'normal' },
+  { key: 'T', label: 'Typewriter / Monospace', fontFamily: 'courier', fontSizePt: 10, fontWeight: 'normal', fontStyle: 'normal' },
+  { key: 'U', label: 'Ultra-thin', fontFamily: 'helvetica', fontSizePt: 10, fontWeight: 'normal', fontStyle: 'normal' },
+  { key: 'V', label: 'Very Large', fontFamily: 'helvetica', fontSizePt: 24, fontWeight: 'normal', fontStyle: 'normal' },
+];
+
+const ZPL_BARCODE_METADATA: BarcodeMetadata[] = [
+  { type: 'code128', label: 'CODE 128' },
+  { type: 'code39', label: 'CODE 39' },
+  { type: 'ean13', label: 'EAN-13' },
+  { type: 'ean8', label: 'EAN-8' },
+  { type: 'upca', label: 'UPC-A' },
+  { type: 'upce', label: 'UPC-E' },
+];
+
+function getZplFontCode(el: TextElement): string {
+  if (typeof el.fontCode === 'string' && el.fontCode.length > 0) return el.fontCode
+  return ZPL_FONT_METADATA[0]?.key ?? '0'
+}
+
 export class ZPLDriver implements LabelDriver {
+  protocol: Protocol = 'zpl';
   supportedExtensions = ['.ezpl'];
+  supportedFonts = ZPL_FONT_METADATA;
+  supportedBarcodes = ZPL_BARCODE_METADATA;
 
   generate(label: LabelTemplate): string {
     const TEXT_FONT_SIZE_SCALE = 1.4
@@ -26,7 +65,6 @@ export class ZPLDriver implements LabelDriver {
       return Math.max(1, Math.round(mm * targetDotsPerMm))
     }
 
-    const normalizeTextScale = (val: number) => (val >= 10 ? val / 10 : (val <= 0 ? 1 : val))
     const estimateAscentDots = (fontHeightDots: number) => Math.round(fontHeightDots * 0.8)
     const estimateAscentCoords = (fontHeightDots: number) => Math.round((estimateAscentDots(fontHeightDots) * COORDS_PER_MM) / targetDotsPerMm)
 
@@ -53,14 +91,27 @@ export class ZPLDriver implements LabelDriver {
     label.elements.forEach((el) => {
       if (el.type === 'text') {
         const textEl = el as TextElement
-        const fontBaseDots = ptToDots(textEl.fontSizePt || 10)
-        const scaleX = normalizeTextScale(textEl.width || 10)
-        const scaleY = normalizeTextScale(textEl.height || 10)
-        const fontHeightDots = Math.max(1, Math.round(fontBaseDots * scaleY))
-        const fontWidthDots = Math.max(1, Math.round(fontBaseDots * scaleX))
+        const fontCode = getZplFontCode(textEl)
+        const fontMeta = ZPL_FONT_METADATA.find((p) => p.key === fontCode) ?? ZPL_FONT_METADATA[0]
+        const fontHeightDots = Math.max(
+          1,
+          Math.round(
+            (typeof textEl.height === 'number' && Number.isFinite(textEl.height) && textEl.height > 0)
+              ? textEl.height
+              : ptToDots(fontMeta?.fontSizePt ?? 10)
+          )
+        )
+        const fontWidthDots = Math.max(
+          1,
+          Math.round(
+            (typeof textEl.width === 'number' && Number.isFinite(textEl.width) && textEl.width > 0)
+              ? textEl.width
+              : fontHeightDots
+          )
+        )
         const yTop = Math.max(0, (textEl.y || 0) - estimateAscentCoords(fontHeightDots))
         lines.push(`^FO${coordsToDots(textEl.x)},${coordsToDots(yTop)}`)
-        lines.push(`^A0${rotationToZpl(textEl.rotation)},${fontHeightDots},${fontWidthDots}`)
+        lines.push(`^A${fontCode}${rotationToZpl(textEl.rotation)},${fontHeightDots},${fontWidthDots}`)
         lines.push(`^FD${safeFieldData(textEl.content ?? '')}^FS`)
         return
       }
@@ -175,7 +226,7 @@ export class ZPLDriver implements LabelDriver {
     const zpl = (start >= 0 && end > start) ? content.slice(start, end + 3) : content
 
     type FieldRecord =
-      | { kind: 'text'; foX: number; foY: number; o: string; hDots: number; wDots: number; data: string }
+      | { kind: 'text'; foX: number; foY: number; fontCode: string; o: string; hDots: number; wDots: number; data: string }
       | { kind: 'barcode'; foX: number; foY: number; type: BarcodeElement['barcodeType']; o: string; hDots: number; showText: boolean; narrowDots: number; data: string }
       | { kind: 'qrcode'; foX: number; foY: number; o: string; mag: number; ec?: string; data: string }
       | { kind: 'gb'; foX: number; foY: number; wDots: number; hDots: number; tDots: number }
@@ -202,7 +253,7 @@ export class ZPLDriver implements LabelDriver {
     let currentFO: { xDots: number; yDots: number } | null = null
     let currentBy: { w: number; r: number; h: number } | null = null
     let pending:
-      | { kind: 'text'; o: string; hDots: number; wDots: number }
+      | { kind: 'text'; fontCode: string; o: string; hDots: number; wDots: number }
       | { kind: 'barcode'; type: BarcodeElement['barcodeType']; o: string; hDots: number; showText: boolean }
       | { kind: 'qrcode'; o: string; mag: number; ec?: string }
       | { kind: 'gb'; wDots: number; hDots: number; tDots: number }
@@ -259,11 +310,12 @@ export class ZPLDriver implements LabelDriver {
         continue
       }
 
-      if (cmd === 'A0') {
+      if (cmd.startsWith('A')) {
+        const fontCode = cmd.slice(1, 2)
         const [o, hStr, wStr] = rest.split(',')
         const hDots = parseInt(hStr, 10)
         const wDots = parseInt(wStr, 10)
-        pending = { kind: 'text', o: o || 'N', hDots: Number.isFinite(hDots) ? hDots : 20, wDots: Number.isFinite(wDots) ? wDots : 20 }
+        pending = { kind: 'text', fontCode, o: o || 'N', hDots: Number.isFinite(hDots) ? hDots : 20, wDots: Number.isFinite(wDots) ? wDots : 20 }
         continue
       }
 
@@ -349,6 +401,7 @@ export class ZPLDriver implements LabelDriver {
             kind: 'text',
             foX: currentFO.xDots,
             foY: currentFO.yDots,
+            fontCode: pending.fontCode,
             o: pending.o,
             hDots: pending.hDots,
             wDots: pending.wDots,
@@ -471,6 +524,10 @@ export class ZPLDriver implements LabelDriver {
     const dotsToCoords = (dots: number) => Math.round(dotsToMm(dots) * COORDS_PER_MM)
     const dotsToPt = (dots: number) => (dotsToMm(dots) / MM_PER_PT)
     const dotsToBaseDots = (dots: number) => Math.max(1, Math.round((dots * DOTS_PER_MM) / sourceDotsPerMm))
+    const ptToDots = (pt: number) => {
+      const mm = (pt * MM_PER_PT) * TEXT_FONT_SIZE_SCALE
+      return Math.max(1, Math.round(mm * sourceDotsPerMm))
+    }
 
     const marginDots = Math.round(10 * sourceDotsPerMm)
     if (hasPW && pwDots !== null) widthMm = dotsToMm(pwDots)
@@ -497,11 +554,9 @@ export class ZPLDriver implements LabelDriver {
       const yCoordsTop = dotsToCoords(field.foY)
 
       if (field.kind === 'text') {
-        const scaleX = field.hDots > 0 ? (field.wDots / field.hDots) : 1
-        const baseDots = field.hDots
         const yBaselineDots = field.foY + estimateAscentDots(field.hDots)
         const yBaseline = dotsToCoords(yBaselineDots)
-        const fontSizePt = dotsToPt(baseDots) / TEXT_FONT_SIZE_SCALE
+        const fontCode = field.fontCode || '0'
 
         const textEl: TextElement = {
           id,
@@ -510,12 +565,9 @@ export class ZPLDriver implements LabelDriver {
           y: yBaseline,
           rotation: zplToRotation(field.o),
           content: field.data,
-          fontFamily: 'helvetica',
-          fontSizePt,
-          fontWeight: 'normal',
-          fontStyle: 'normal',
-          width: scaleX,
-          height: 1
+          fontCode,
+          width: Math.max(1, Math.round(field.wDots)),
+          height: Math.max(1, Math.round(field.hDots))
         }
         elements.push(textEl)
         continue
@@ -616,7 +668,8 @@ export class ZPLDriver implements LabelDriver {
       width: widthMm,
       height: heightMm,
       elements,
-      printSettings
+      printSettings,
+      protocol: 'zpl'
     }
   }
 }

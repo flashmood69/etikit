@@ -8,9 +8,10 @@ It supports both TPCL and ZPL label formats.
 - **Visual Label Designer**: A simple and intuitive drag-and-drop interface for designing labels.
 - **Element Support**: Add and configure text elements, lines, rectangles, barcodes, and QR codes.
 - **TPCL Integration**: Generates printer-ready code following the TPCL specification.
-- **ZPL Integration**: Generates printer-ready code following the ZPL specification.
+- **ZPL Integration**: Generates printer-ready code following the ZPL specification. Supports font sizing in dots for high precision.
+- **Font Presets**: Centralized font management using driver-specific font codes.
 - **Template Management**:
-  - Save and load label designs as JSON templates.
+  - Save and load label designs as JSON templates (storing only font codes for efficiency).
   - Import TPCL/ZPL files (`.tpcl`, `.zpl`, `.txt`) into the designer.
   - Auto-select export format based on the loaded file type.
 - **Label Size Presets**: Create a new label using common industrial sizes (default: **102 × 76 mm (4" × 3")**).
@@ -60,7 +61,20 @@ It supports both TPCL and ZPL label formats.
 - Use **Load** to import a JSON template or TPCL/ZPL file.
 - Pick **TPCL** or **ZPL** in the export dropdown (auto-selected after importing), then click **Export**.
 
-### Building for Production
+## Technical Notes
+
+### ZPL Font Sizing
+In the ZPL protocol, font width and height are measured in **dots** rather than points (pt) or scale factors. Etikit respects this by:
+- Storing `width` and `height` as dot values for ZPL elements.
+- Converting dots to millimeters (mm) and then to pixels (px) for the designer preview based on the `zplDotsPerMm` setting (default: 8 dots/mm for 203 DPI).
+
+### Font Management
+To simplify templates and ensure driver consistency, Etikit uses a `fontCode` system:
+- **Templates** only store the `fontCode` for text elements.
+- **Drivers** (TPCL/ZPL) define the metadata (font family, weight, style) for each code.
+- The **UI** resolves these properties at runtime to render the correct font in the designer.
+
+## Building for Production
 
 To create a production-ready build:
 ```bash

@@ -5,7 +5,7 @@ import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 import Barcode from 'react-barcode'
 import { QRCodeSVG } from 'qrcode.react'
-import { LabelElement, ElementType, TextElement, BarcodeElement, QRCodeElement, LineElement, RectangleElement, LabelTemplate, DOTS_PER_MM, COORDS_PER_MM, PrintSettings } from './types'
+import { LabelElement, ElementType, TextElement, BarcodeElement, QRCodeElement, LineElement, RectangleElement, LabelTemplate, DOTS_PER_MM, COORDS_PER_MM, PrintSettings, Protocol, FontMetadata } from './types'
 import { drivers, getDriverForFile } from './drivers'
 
 function cn(...inputs: ClassValue[]) {
@@ -22,38 +22,6 @@ const FONT_FAMILY_CSS: Record<string, string> = {
   'ocr-a': '"OCR A Std", "OCR A", monospace',
   'ocr-b': '"OCR B Std", "OCR B", monospace'
 }
-
-type FontPreset = {
-  key: string;
-  label: string;
-  fontFamily: string;
-  fontSizePt: number;
-  fontWeight: 'normal' | 'bold';
-  fontStyle: 'normal' | 'italic';
-}
-
-const FONT_PRESETS: FontPreset[] = [
-  { key: 'A', label: 'Times Roman 8pt Medium', fontFamily: 'times', fontSizePt: 8, fontWeight: 'normal', fontStyle: 'normal' },
-  { key: 'B', label: 'Times Roman 10pt Medium', fontFamily: 'times', fontSizePt: 10, fontWeight: 'normal', fontStyle: 'normal' },
-  { key: 'C', label: 'Times Roman 10pt Bold', fontFamily: 'times', fontSizePt: 10, fontWeight: 'bold', fontStyle: 'normal' },
-  { key: 'D', label: 'Times Roman 12pt Bold', fontFamily: 'times', fontSizePt: 12, fontWeight: 'bold', fontStyle: 'normal' },
-  { key: 'E', label: 'Times Roman 14pt Bold', fontFamily: 'times', fontSizePt: 14, fontWeight: 'bold', fontStyle: 'normal' },
-  { key: 'F', label: 'Times Roman 12pt Italic', fontFamily: 'times', fontSizePt: 12, fontWeight: 'normal', fontStyle: 'italic' },
-  { key: 'G', label: 'Helvetica 6pt Medium', fontFamily: 'helvetica', fontSizePt: 6, fontWeight: 'normal', fontStyle: 'normal' },
-  { key: 'H', label: 'Helvetica 10pt Medium', fontFamily: 'helvetica', fontSizePt: 10, fontWeight: 'normal', fontStyle: 'normal' },
-  { key: 'I', label: 'Helvetica 12pt Medium', fontFamily: 'helvetica', fontSizePt: 12, fontWeight: 'normal', fontStyle: 'normal' },
-  { key: 'J', label: 'Helvetica 12pt Bold', fontFamily: 'helvetica', fontSizePt: 12, fontWeight: 'bold', fontStyle: 'normal' },
-  { key: 'K', label: 'Helvetica 14pt Bold', fontFamily: 'helvetica', fontSizePt: 14, fontWeight: 'bold', fontStyle: 'normal' },
-  { key: 'L', label: 'Helvetica 12pt Italic', fontFamily: 'helvetica', fontSizePt: 12, fontWeight: 'normal', fontStyle: 'italic' },
-  { key: 'M', label: 'Presentation Bold 18pt', fontFamily: 'presentation', fontSizePt: 18, fontWeight: 'bold', fontStyle: 'normal' },
-  { key: 'N', label: 'Letter Gothic 9.5pt', fontFamily: 'letter-gothic', fontSizePt: 9.5, fontWeight: 'normal', fontStyle: 'normal' },
-  { key: 'O', label: 'Prestige Elite 7pt', fontFamily: 'prestige-elite', fontSizePt: 7, fontWeight: 'normal', fontStyle: 'normal' },
-  { key: 'P', label: 'Prestige Elite 10pt', fontFamily: 'prestige-elite', fontSizePt: 10, fontWeight: 'normal', fontStyle: 'normal' },
-  { key: 'Q', label: 'Courier 10pt', fontFamily: 'courier', fontSizePt: 10, fontWeight: 'normal', fontStyle: 'normal' },
-  { key: 'R', label: 'Courier Bold 12pt', fontFamily: 'courier', fontSizePt: 12, fontWeight: 'bold', fontStyle: 'normal' },
-  { key: 'S', label: 'OCR-A 12pt', fontFamily: 'ocr-a', fontSizePt: 12, fontWeight: 'normal', fontStyle: 'normal' },
-  { key: 'T', label: 'OCR-B 12pt', fontFamily: 'ocr-b', fontSizePt: 12, fontWeight: 'normal', fontStyle: 'normal' }
-]
 
 const normalizeTextScale = (val: number) => (val >= 10 ? val / 10 : (val <= 0 ? 1 : val));
 
@@ -102,11 +70,43 @@ function formatLabelSizePreset(preset: LabelSizePreset) {
   return `${formatMm(preset.widthMm)} × ${formatMm(preset.heightMm)} mm (${formatInches(preset.widthMm)}" × ${formatInches(preset.heightMm)}")`
 }
 
-function getTextFontStyle(textEl: TextElement, zoom: number) {
-  const fontFamily = FONT_FAMILY_CSS[textEl.fontFamily] || FONT_FAMILY_CSS.helvetica;
-  const fontWeight = textEl.fontWeight || 'normal';
-  const fontStyle = textEl.fontStyle || 'normal';
-  const fontSizePx = (textEl.fontSizePt || 10) * MM_PER_PT * zoom * TEXT_FONT_SIZE_SCALE;
+function resolveFontMeta(textEl: TextElement, supportedFonts: FontMetadata[]) {
+  return supportedFonts.find((p) => p.key === textEl.fontCode) ?? supportedFonts[0];
+}
+
+function getTextScales(textEl: TextElement, protocol: Protocol) {
+  if (protocol === 'zpl') {
+    const widthDots = typeof textEl.width === 'number' && Number.isFinite(textEl.width) ? textEl.width : 0;
+    const heightDots = typeof textEl.height === 'number' && Number.isFinite(textEl.height) ? textEl.height : 0;
+    const scaleX = widthDots > 0 && heightDots > 0 ? (widthDots / heightDots) : 1;
+    return { scaleX, scaleY: 1 };
+  }
+  const scaleX = normalizeTextScale(textEl.width || 10);
+  const scaleY = normalizeTextScale(textEl.height || 10);
+  return { scaleX, scaleY };
+}
+
+function getTextFontStyle(
+  textEl: TextElement,
+  zoom: number,
+  supportedFonts: FontMetadata[],
+  protocol: Protocol,
+  printSettings: PrintSettings
+) {
+  const fontMeta = resolveFontMeta(textEl, supportedFonts);
+  const fontFamilyKey = fontMeta?.fontFamily ?? 'helvetica';
+  const fontFamily = FONT_FAMILY_CSS[fontFamilyKey] || FONT_FAMILY_CSS.helvetica;
+  const fontWeight = fontMeta?.fontWeight ?? 'normal';
+  const fontStyle = fontMeta?.fontStyle ?? 'normal';
+  const fontSizePx = (() => {
+    if (protocol !== 'zpl') return (fontMeta?.fontSizePt ?? 10) * MM_PER_PT * zoom * TEXT_FONT_SIZE_SCALE;
+    const targetDotsPerMm = printSettings?.zplDotsPerMm ?? DOTS_PER_MM;
+    const heightDots =
+      typeof textEl.height === 'number' && Number.isFinite(textEl.height) && textEl.height > 0
+        ? textEl.height
+        : Math.max(1, Math.round(((fontMeta?.fontSizePt ?? 10) * MM_PER_PT) * TEXT_FONT_SIZE_SCALE * targetDotsPerMm));
+    return (heightDots / targetDotsPerMm) * zoom;
+  })();
   return { fontSizePx, fontWeight, fontStyle, fontFamily };
 }
 
@@ -145,15 +145,14 @@ function getLineBoundingBoxPx(lineEl: LineElement, zoom: number) {
   return { dx, dy, thicknessPx, minX, minY, width, height };
 }
 
-function getElementSize(element: LabelElement, zoom: number) {
+function getElementSize(element: LabelElement, zoom: number, supportedFonts: FontMetadata[], protocol: Protocol, printSettings: PrintSettings) {
   const dotsToPx = (dots: number) => (dots / DOTS_PER_MM) * zoom;
   const coordsToPx = (coords: number) => (coords / COORDS_PER_MM) * zoom;
   
   if (element.type === 'text') {
     const textEl = element as TextElement;
-    const font = getTextFontStyle(textEl, zoom);
-    const scaleX = normalizeTextScale(textEl.width || 10);
-    const scaleY = normalizeTextScale(textEl.height || 10);
+    const font = getTextFontStyle(textEl, zoom, supportedFonts, protocol, printSettings);
+    const { scaleX, scaleY } = getTextScales(textEl, protocol);
     
     const lines = (element.content || '').split('\n');
     let maxLineWidth = 0;
@@ -204,9 +203,9 @@ function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [labelSize, setLabelSize] = useState({ width: 102, height: 76 });
   const [labelName, setLabelName] = useState('Untitled');
+  const [protocol, setProtocol] = useState<Protocol>('tpcl');
   const [zoom, setZoom] = useState(4); // 1mm = 4px
   const [isAutoZoom, setIsAutoZoom] = useState(false);
-  const [exportFormat, setExportFormat] = useState<'tpcl' | 'zpl'>('tpcl')
   const [printSettings, setPrintSettings] = useState<PrintSettings>({
     quantity: 1,
     speed: 3,
@@ -214,29 +213,19 @@ function App() {
   });
   const [isNewConfirmOpen, setIsNewConfirmOpen] = useState(false);
   const [newLabelPresetId, setNewLabelPresetId] = useState(DEFAULT_LABEL_SIZE_PRESET_ID);
+  const [newProtocol, setNewProtocol] = useState<Protocol>('tpcl');
   const editorViewportRef = useRef<HTMLDivElement | null>(null);
   
   const selectedElement = elements.find(el => el.id === selectedId);
+  const currentDriver = drivers[protocol];
+
   const getFontPresetKey = (textEl: TextElement) => {
-    const fontWeight = textEl.fontWeight || 'normal';
-    const fontStyle = textEl.fontStyle || 'normal';
-    const match = FONT_PRESETS.find(p =>
-      p.fontFamily === textEl.fontFamily &&
-      p.fontSizePt === textEl.fontSizePt &&
-      p.fontWeight === fontWeight &&
-      p.fontStyle === fontStyle
-    );
-    return match?.key ?? 'G';
+    return textEl.fontCode || currentDriver.supportedFonts[0]?.key;
   };
 
   const applyFontPreset = (id: string, presetKey: string) => {
-    const preset = FONT_PRESETS.find(p => p.key === presetKey);
-    if (!preset) return;
     updateElement(id, {
-      fontFamily: preset.fontFamily,
-      fontSizePt: preset.fontSizePt,
-      fontWeight: preset.fontWeight,
-      fontStyle: preset.fontStyle
+      fontCode: presetKey,
     } as any);
   };
 
@@ -254,10 +243,39 @@ function App() {
 
     switch (type) {
       case 'text':
-        newElement = { ...base, type: 'text', content: 'New Text', fontFamily: 'helvetica', fontSizePt: 10, fontWeight: 'normal', fontStyle: 'normal', width: 10, height: 10 } as TextElement;
+        {
+          const defaultFont = currentDriver.supportedFonts[0];
+          const defaultTextSize = (() => {
+            if (protocol !== 'zpl') return { width: 10, height: 10 };
+            const targetDotsPerMm = printSettings?.zplDotsPerMm ?? DOTS_PER_MM;
+            const heightDots = Math.max(
+              1,
+              Math.round((((defaultFont?.fontSizePt ?? 10) * MM_PER_PT) * TEXT_FONT_SIZE_SCALE) * targetDotsPerMm)
+            );
+            return { width: heightDots, height: heightDots };
+          })();
+          newElement = { 
+            ...base, 
+            type: 'text', 
+            content: 'New Text', 
+            fontCode: defaultFont?.key ?? '0',
+            width: defaultTextSize.width,
+            height: defaultTextSize.height
+          } as TextElement;
+        }
         break;
       case 'barcode':
-        newElement = { ...base, type: 'barcode', content: '12345678', barcodeType: 'code128', height: 100, width: 3 } as BarcodeElement;
+        {
+          const defaultBarcode = currentDriver.supportedBarcodes[0];
+          newElement = { 
+            ...base, 
+            type: 'barcode', 
+            content: '12345678', 
+            barcodeType: defaultBarcode?.type ?? 'code128', 
+            height: 100, 
+            width: 3 
+          } as BarcodeElement;
+        }
         break;
       case 'qrcode':
         newElement = { ...base, type: 'qrcode', content: '12345678', size: 5 } as QRCodeElement;
@@ -337,16 +355,17 @@ function App() {
     return () => ro.disconnect();
   }, [isAutoZoom, labelSize.width, labelSize.height]);
 
-  const exportLabel = (protocol: string) => {
+  const exportLabel = () => {
     const template: LabelTemplate = {
       name: labelName,
       width: labelSize.width,
       height: labelSize.height,
       elements,
-      printSettings
+      printSettings,
+      protocol
     };
     
-    const driver = drivers[protocol.toLowerCase()];
+    const driver = drivers[protocol];
     if (!driver) {
       alert(`Driver for ${protocol} not found`);
       return;
@@ -357,7 +376,7 @@ function App() {
     // Convert string to bytes. TPCL might need Windows-1252, ZPL might need UTF-8.
     // For now, we'll use a basic mapping or TextEncoder.
     let bytes: Uint8Array;
-    if (protocol.toLowerCase() === 'tpcl') {
+    if (protocol === 'tpcl') {
       bytes = new Uint8Array(output.length);
       for (let i = 0; i < output.length; i++) {
         const charCode = output.charCodeAt(i);
@@ -382,7 +401,8 @@ function App() {
       width: labelSize.width,
       height: labelSize.height,
       elements,
-      printSettings
+      printSettings,
+      protocol
     };
     const json = JSON.stringify(template, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
@@ -445,10 +465,12 @@ function App() {
           if (template.printSettings) {
             setPrintSettings(template.printSettings);
           }
-          {
+          if (template.protocol) {
+            setProtocol(template.protocol);
+          } else {
             const lower = file.name.toLowerCase()
-            if (lower.endsWith('.ezpl')) setExportFormat('zpl')
-            if (lower.endsWith('.etec')) setExportFormat('tpcl')
+            if (lower.endsWith('.ezpl')) setProtocol('zpl')
+            if (lower.endsWith('.etec')) setProtocol('tpcl')
           }
           setSelectedId(null);
         } else {
@@ -464,12 +486,13 @@ function App() {
     e.target.value = '';
   };
 
-  const resetToNew = (size?: { width: number; height: number }) => {
+  const resetToNew = (size?: { width: number; height: number }, newProtocol?: Protocol) => {
     const nextSize = size ?? { width: 102, height: 76 }
     setElements([]);
     setSelectedId(null);
     setLabelName('Untitled');
     setLabelSize(nextSize);
+    if (newProtocol) setProtocol(newProtocol);
     setPrintSettings({ quantity: 1, speed: 3, darkness: 10 });
   };
 
@@ -511,15 +534,11 @@ function App() {
             Save
           </button>
           <div className="flex items-center gap-2 ml-2">
-            <select
-              className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-              value={exportFormat}
-              onChange={(e) => setExportFormat(e.target.value as 'tpcl' | 'zpl')}
-            >
-              <option value="tpcl">TPCL</option>
-              <option value="zpl">ZPL</option>
-            </select>
-            <button onClick={() => exportLabel(exportFormat)} className="flex items-center gap-2 rounded-md bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 shadow-sm transition-all active:scale-95">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-100 border border-slate-200">
+              <span className="text-[10px] font-bold text-slate-400 uppercase">Protocol</span>
+              <span className="text-xs font-bold text-slate-700 uppercase">{protocol}</span>
+            </div>
+            <button onClick={exportLabel} className="flex items-center gap-2 rounded-md bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 shadow-sm transition-all active:scale-95">
               <FileDown size={16} />
               Export
             </button>
@@ -544,19 +563,32 @@ function App() {
                 This will clear the current design.
               </div>
             </div>
-            <div className="p-5 border-b border-slate-100">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Label Size</label>
-              <select
-                className="mt-2 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                value={newLabelPresetId}
-                onChange={(e) => setNewLabelPresetId(e.target.value)}
-              >
-                {LABEL_SIZE_PRESETS.map((preset) => (
-                  <option key={preset.id} value={preset.id}>
-                    {formatLabelSizePreset(preset)}
-                  </option>
-                ))}
-              </select>
+            <div className="p-5 border-b border-slate-100 space-y-4">
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Protocol</label>
+                <select
+                  className="mt-2 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                  value={newProtocol}
+                  onChange={(e) => setNewProtocol(e.target.value as Protocol)}
+                >
+                  <option value="tpcl">TPCL (Toshiba)</option>
+                  <option value="zpl">ZPL (Zebra)</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Label Size</label>
+                <select
+                  className="mt-2 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                  value={newLabelPresetId}
+                  onChange={(e) => setNewLabelPresetId(e.target.value)}
+                >
+                  {LABEL_SIZE_PRESETS.map((preset) => (
+                    <option key={preset.id} value={preset.id}>
+                      {formatLabelSizePreset(preset)}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
             <div className="p-5 flex justify-end gap-2">
               <button
@@ -571,7 +603,7 @@ function App() {
                     LABEL_SIZE_PRESETS.find((p) => p.id === newLabelPresetId) ??
                     LABEL_SIZE_PRESETS.find((p) => p.id === DEFAULT_LABEL_SIZE_PRESET_ID) ??
                     LABEL_SIZE_PRESETS[0];
-                  resetToNew({ width: preset.widthMm, height: preset.heightMm });
+                  resetToNew({ width: preset.widthMm, height: preset.heightMm }, newProtocol);
                   setIsNewConfirmOpen(false);
                 }}
                 className="rounded-md bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 shadow-sm transition-all active:scale-95"
@@ -650,6 +682,9 @@ function App() {
                   key={el.id} 
                   element={el} 
                   zoom={zoom} 
+                  protocol={protocol}
+                  printSettings={printSettings}
+                  supportedFonts={currentDriver.supportedFonts}
                   isSelected={selectedId === el.id}
                   onSelect={() => setSelectedId(el.id)}
                   onDrag={(data) => handleDrag(el.id, data)}
@@ -735,25 +770,25 @@ function App() {
                         value={getFontPresetKey(selectedElement as TextElement)}
                         onChange={(e) => applyFontPreset(selectedElement.id, e.target.value)}
                       >
-                        {FONT_PRESETS.map(p => (
+                        {currentDriver.supportedFonts.map(p => (
                           <option key={p.key} value={p.key}>{p.label}</option>
                         ))}
                       </select>
                     </div>
                     <PropertyGrid>
                       <PropertyInput 
-                        label="Width Scale" 
+                        label={protocol === 'zpl' ? 'Font Width (dots)' : 'Width Scale'} 
                         value={selectedElement.width} 
                         onChange={(val) => updateElement(selectedElement.id, { width: parseFloat(val) })}
                         type="number"
-                        step={0.1}
+                        step={protocol === 'zpl' ? 1 : 0.1}
                       />
                       <PropertyInput 
-                        label="Height Scale" 
+                        label={protocol === 'zpl' ? 'Font Height (dots)' : 'Height Scale'} 
                         value={selectedElement.height} 
                         onChange={(val) => updateElement(selectedElement.id, { height: parseFloat(val) })}
                         type="number"
-                        step={0.1}
+                        step={protocol === 'zpl' ? 1 : 0.1}
                       />
                     </PropertyGrid>
                   </>
@@ -777,12 +812,9 @@ function App() {
                         value={selectedElement.barcodeType}
                         onChange={(e) => updateElement(selectedElement.id, { barcodeType: e.target.value })}
                       >
-                        <option value="code128">CODE 128</option>
-                        <option value="code39">CODE 39</option>
-                        <option value="ean13">EAN-13</option>
-                        <option value="ean8">EAN-8</option>
-                        <option value="upca">UPC-A</option>
-                        <option value="upce">UPC-E</option>
+                        {currentDriver.supportedBarcodes.map(b => (
+                          <option key={b.type} value={b.type}>{b.label}</option>
+                        ))}
                       </select>
                     </div>
                     <PropertyGrid>
@@ -1055,9 +1087,12 @@ function PropertyInput({
   )
 }
 
-function DraggableElement({ element, zoom, isSelected, onSelect, onDrag }: { 
+function DraggableElement({ element, zoom, protocol, printSettings, supportedFonts, isSelected, onSelect, onDrag }: { 
   element: LabelElement, 
   zoom: number,
+  protocol: Protocol,
+  printSettings: PrintSettings,
+  supportedFonts: FontMetadata[],
   isSelected: boolean,
   onSelect: () => void, 
   onDrag: (data: { x: number, y: number }) => void,
@@ -1065,7 +1100,7 @@ function DraggableElement({ element, zoom, isSelected, onSelect, onDrag }: {
   const nodeRef = useRef<HTMLDivElement | null>(null);
   
   const rotation = ((element.rotation || 0) % 4 + 4) % 4;
-  const size = getElementSize(element, zoom);
+  const size = getElementSize(element, zoom, supportedFonts, protocol, printSettings);
   const rawWidth = size.width;
   const rawHeight = size.height;
 
@@ -1086,9 +1121,9 @@ function DraggableElement({ element, zoom, isSelected, onSelect, onDrag }: {
   const baselineOffsetPx = (() => {
     if (element.type !== 'text') return 0;
     const textEl = element as TextElement;
-    const font = getTextFontStyle(textEl, zoom);
+    const font = getTextFontStyle(textEl, zoom, supportedFonts, protocol, printSettings);
     const { ascent } = getFontMetricsPx(font);
-    const scaleY = normalizeTextScale(textEl.height || 10);
+    const { scaleY } = getTextScales(textEl, protocol);
     return ascent * scaleY;
   })();
 
@@ -1125,7 +1160,7 @@ function DraggableElement({ element, zoom, isSelected, onSelect, onDrag }: {
           onSelect();
         }}
       >
-        <ElementRenderer element={element} zoom={zoom} />
+        <ElementRenderer element={element} zoom={zoom} protocol={protocol} printSettings={printSettings} supportedFonts={supportedFonts} />
         
         {/* Selection handles (visual only for now) */}
         {isSelected && (
@@ -1141,7 +1176,7 @@ function DraggableElement({ element, zoom, isSelected, onSelect, onDrag }: {
   );
 }
 
-function ElementRenderer({ element, zoom }: { element: LabelElement, zoom: number }) {
+function ElementRenderer({ element, zoom, protocol, printSettings, supportedFonts }: { element: LabelElement, zoom: number, protocol: Protocol, printSettings: PrintSettings, supportedFonts: FontMetadata[] }) {
   const rotation = ((element.rotation || 0) % 4 + 4) % 4;
   const rotationDegrees = rotation * 90;
 
@@ -1151,9 +1186,8 @@ function ElementRenderer({ element, zoom }: { element: LabelElement, zoom: numbe
     switch (element.type) {
       case 'text': {
         const textEl = element as TextElement;
-        const font = getTextFontStyle(textEl, zoom);
-        const scaleX = normalizeTextScale(textEl.width || 10);
-        const scaleY = normalizeTextScale(textEl.height || 10);
+        const font = getTextFontStyle(textEl, zoom, supportedFonts, protocol, printSettings);
+        const { scaleX, scaleY } = getTextScales(textEl, protocol);
 
         return (
           <div 
@@ -1267,7 +1301,7 @@ function ElementRenderer({ element, zoom }: { element: LabelElement, zoom: numbe
     }
   };
 
-  const { width: rawWidth, height: rawHeight } = getElementSize(element, zoom);
+  const { width: rawWidth, height: rawHeight } = getElementSize(element, zoom, supportedFonts, protocol, printSettings);
   
   // Calculate bounding box for rotated element
   const rotationRad = (rotation * 90 * Math.PI) / 180;

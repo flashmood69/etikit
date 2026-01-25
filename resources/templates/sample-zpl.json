@@ -1,0 +1,272 @@
+{
+  "name": "Imported ZPL",
+  "width": 121.5,
+  "height": 70.1,
+  "elements": [
+    {
+      "id": "7ci40f3qs",
+      "type": "qrcode",
+      "x": 42,
+      "y": 254,
+      "rotation": 0,
+      "content": "XY,A26019001/5",
+      "size": 3,
+      "errorCorrection": "M"
+    },
+    {
+      "id": "me71ddwv8",
+      "type": "text",
+      "x": 254,
+      "y": 83,
+      "rotation": 0,
+      "content": "000000123",
+      "fontCode": "0",
+      "width": 181,
+      "height": 120
+    },
+    {
+      "id": "u0ze035ne",
+      "type": "text",
+      "x": 254,
+      "y": 120,
+      "rotation": 0,
+      "content": "SIERRA BRAVO TANGO",
+      "fontCode": "0",
+      "width": 60,
+      "height": 80
+    },
+    {
+      "id": "tzoyjk7ry",
+      "type": "text",
+      "x": 254,
+      "y": 168,
+      "rotation": 0,
+      "content": "50000000456",
+      "fontCode": "0",
+      "width": 181,
+      "height": 120
+    },
+    {
+      "id": "8yebb295s",
+      "type": "text",
+      "x": 254,
+      "y": 209,
+      "rotation": 0,
+      "content": "VERS01",
+      "fontCode": "0",
+      "width": 60,
+      "height": 80
+    },
+    {
+      "id": "3bq5elcgr",
+      "type": "text",
+      "x": 762,
+      "y": 203,
+      "rotation": 0,
+      "content": "Date",
+      "fontCode": "0",
+      "width": 70,
+      "height": 100
+    },
+    {
+      "id": "qujocgzm1",
+      "type": "text",
+      "x": 762,
+      "y": 246,
+      "rotation": 0,
+      "content": "25/01/2026",
+      "fontCode": "0",
+      "width": 70,
+      "height": 100
+    },
+    {
+      "id": "8smsjt2nl",
+      "type": "text",
+      "x": 254,
+      "y": 281,
+      "rotation": 0,
+      "content": "Requested quantity",
+      "fontCode": "0",
+      "width": 60,
+      "height": 80
+    },
+    {
+      "id": "6eht98ldr",
+      "type": "text",
+      "x": 254,
+      "y": 322,
+      "rotation": 0,
+      "content": "0,121 kg",
+      "fontCode": "0",
+      "width": 100,
+      "height": 100
+    },
+    {
+      "id": "yy1eametk",
+      "type": "text",
+      "x": 254,
+      "y": 373,
+      "rotation": 0,
+      "content": "26019001/5",
+      "fontCode": "0",
+      "width": 70,
+      "height": 100
+    },
+    {
+      "id": "bc134taj4",
+      "type": "text",
+      "x": 466,
+      "y": 373,
+      "rotation": 0,
+      "content": "Test",
+      "fontCode": "0",
+      "width": 70,
+      "height": 100
+    },
+    {
+      "id": "djzj271an",
+      "type": "text",
+      "x": 254,
+      "y": 423,
+      "rotation": 0,
+      "content": "",
+      "fontCode": "0",
+      "width": 90,
+      "height": 100
+    },
+    {
+      "id": "az24kggn7",
+      "type": "text",
+      "x": 254,
+      "y": 485,
+      "rotation": 0,
+      "content": "0/3 POT MWS",
+      "fontCode": "0",
+      "width": 90,
+      "height": 120
+    },
+    {
+      "id": "b87i4albw",
+      "type": "text",
+      "x": 254,
+      "y": 549,
+      "rotation": 0,
+      "content": "0 kg   ",
+      "fontCode": "0",
+      "width": 90,
+      "height": 120
+    },
+    {
+      "id": "xnzre3ivv",
+      "type": "text",
+      "x": 635,
+      "y": 464,
+      "rotation": 0,
+      "content": "40 TEST J.DOE",
+      "fontCode": "0",
+      "width": 90,
+      "height": 120
+    },
+    {
+      "id": "7t765kvku",
+      "type": "text",
+      "x": 635,
+      "y": 506,
+      "rotation": 0,
+      "content": "",
+      "fontCode": "0",
+      "width": 90,
+      "height": 120
+    },
+    {
+      "id": "c8r0db11y",
+      "type": "text",
+      "x": 635,
+      "y": 549,
+      "rotation": 0,
+      "content": "",
+      "fontCode": "0",
+      "width": 90,
+      "height": 120
+    },
+    {
+      "id": "ewz3bi5c1",
+      "type": "text",
+      "x": 42,
+      "y": 591,
+      "rotation": 0,
+      "content": "",
+      "fontCode": "0",
+      "width": 90,
+      "height": 120
+    },
+    {
+      "id": "x2s25vtmf",
+      "type": "text",
+      "x": 466,
+      "y": 591,
+      "rotation": 0,
+      "content": "",
+      "fontCode": "0",
+      "width": 90,
+      "height": 120
+    },
+    {
+      "id": "ab5gh9d9u",
+      "type": "line",
+      "x": 601,
+      "y": 381,
+      "rotation": 0,
+      "x2": 1024,
+      "y2": 381,
+      "thickness": 1
+    },
+    {
+      "id": "dwrq51yyn",
+      "type": "line",
+      "x": 237,
+      "y": 330,
+      "rotation": 0,
+      "x2": 601,
+      "y2": 330,
+      "thickness": 1
+    },
+    {
+      "id": "2wv4bz23z",
+      "type": "line",
+      "x": 601,
+      "y": 330,
+      "rotation": 0,
+      "x2": 601,
+      "y2": 542,
+      "thickness": 1
+    },
+    {
+      "id": "e6axxumru",
+      "type": "line",
+      "x": 237,
+      "y": 42,
+      "rotation": 0,
+      "x2": 237,
+      "y2": 550,
+      "thickness": 1
+    },
+    {
+      "id": "4afb0iln6",
+      "type": "barcode",
+      "x": 635,
+      "y": 288,
+      "rotation": 0,
+      "content": "50000000456",
+      "barcodeType": "code128",
+      "width": 2,
+      "height": 85,
+      "showText": false
+    }
+  ],
+  "printSettings": {
+    "quantity": 1,
+    "zplDotsPerMm": 23.622
+  },
+  "protocol": "zpl"
+}

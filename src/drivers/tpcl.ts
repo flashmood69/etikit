@@ -7,7 +7,10 @@ import {
   LineElement, 
   RectangleElement, 
   COORDS_PER_MM,
-  LabelDriver
+  LabelDriver,
+  Protocol,
+  FontMetadata,
+  BarcodeMetadata
 } from '../types';
 
 type Typography = {
@@ -40,23 +43,41 @@ const TPCL_FONT_PRESETS: Record<string, Typography> = {
   T: { fontFamily: 'ocr-b', fontSizePt: 12, fontWeight: 'normal', fontStyle: 'normal' }
 };
 
-function normalizeTypography(el: TextElement): Typography {
-  const fontWeight = (el.fontWeight === 'bold' ? 'bold' : 'normal') as Typography['fontWeight'];
-  const fontStyle = (el.fontStyle === 'italic' ? 'italic' : 'normal') as Typography['fontStyle'];
-  const fontFamily = typeof el.fontFamily === 'string' && el.fontFamily.length > 0 ? el.fontFamily : 'helvetica';
-  const fontSizePt = typeof el.fontSizePt === 'number' && Number.isFinite(el.fontSizePt) && el.fontSizePt > 0 ? el.fontSizePt : 10;
-  return { fontFamily, fontSizePt, fontWeight, fontStyle };
-}
+const TPCL_FONT_METADATA: FontMetadata[] = [
+  { key: 'A', label: 'Times Roman 8pt Medium', fontFamily: 'times', fontSizePt: 8, fontWeight: 'normal', fontStyle: 'normal' },
+  { key: 'B', label: 'Times Roman 10pt Medium', fontFamily: 'times', fontSizePt: 10, fontWeight: 'normal', fontStyle: 'normal' },
+  { key: 'C', label: 'Times Roman 10pt Bold', fontFamily: 'times', fontSizePt: 10, fontWeight: 'bold', fontStyle: 'normal' },
+  { key: 'D', label: 'Times Roman 12pt Bold', fontFamily: 'times', fontSizePt: 12, fontWeight: 'bold', fontStyle: 'normal' },
+  { key: 'E', label: 'Times Roman 14pt Bold', fontFamily: 'times', fontSizePt: 14, fontWeight: 'bold', fontStyle: 'normal' },
+  { key: 'F', label: 'Times Roman 12pt Italic', fontFamily: 'times', fontSizePt: 12, fontWeight: 'normal', fontStyle: 'italic' },
+  { key: 'G', label: 'Helvetica 6pt Medium', fontFamily: 'helvetica', fontSizePt: 6, fontWeight: 'normal', fontStyle: 'normal' },
+  { key: 'H', label: 'Helvetica 10pt Medium', fontFamily: 'helvetica', fontSizePt: 10, fontWeight: 'normal', fontStyle: 'normal' },
+  { key: 'I', label: 'Helvetica 12pt Medium', fontFamily: 'helvetica', fontSizePt: 12, fontWeight: 'normal', fontStyle: 'normal' },
+  { key: 'J', label: 'Helvetica 12pt Bold', fontFamily: 'helvetica', fontSizePt: 12, fontWeight: 'bold', fontStyle: 'normal' },
+  { key: 'K', label: 'Helvetica 14pt Bold', fontFamily: 'helvetica', fontSizePt: 14, fontWeight: 'bold', fontStyle: 'normal' },
+  { key: 'L', label: 'Helvetica 12pt Italic', fontFamily: 'helvetica', fontSizePt: 12, fontWeight: 'normal', fontStyle: 'italic' },
+  { key: 'M', label: 'Presentation Bold 18pt', fontFamily: 'presentation', fontSizePt: 18, fontWeight: 'bold', fontStyle: 'normal' },
+  { key: 'N', label: 'Letter Gothic 9.5pt', fontFamily: 'letter-gothic', fontSizePt: 9.5, fontWeight: 'normal', fontStyle: 'normal' },
+  { key: 'O', label: 'Prestige Elite 7pt', fontFamily: 'prestige-elite', fontSizePt: 7, fontWeight: 'normal', fontStyle: 'normal' },
+  { key: 'P', label: 'Prestige Elite 10pt', fontFamily: 'prestige-elite', fontSizePt: 10, fontWeight: 'normal', fontStyle: 'normal' },
+  { key: 'Q', label: 'Courier 10pt', fontFamily: 'courier', fontSizePt: 10, fontWeight: 'normal', fontStyle: 'normal' },
+  { key: 'R', label: 'Courier Bold 12pt', fontFamily: 'courier', fontSizePt: 12, fontWeight: 'bold', fontStyle: 'normal' },
+  { key: 'S', label: 'OCR-A 12pt', fontFamily: 'ocr-a', fontSizePt: 12, fontWeight: 'normal', fontStyle: 'normal' },
+  { key: 'T', label: 'OCR-B 12pt', fontFamily: 'ocr-b', fontSizePt: 12, fontWeight: 'normal', fontStyle: 'normal' }
+];
+
+const TPCL_BARCODE_METADATA: BarcodeMetadata[] = [
+  { type: 'code128', label: 'CODE 128' },
+  { type: 'code39', label: 'CODE 39' },
+  { type: 'ean13', label: 'EAN-13' },
+  { type: 'ean8', label: 'EAN-8' },
+  { type: 'upca', label: 'UPC-A' },
+  { type: 'upce', label: 'UPC-E' },
+];
 
 function getTpclFontId(el: TextElement): string {
-  const typography = normalizeTypography(el);
-  const match = Object.entries(TPCL_FONT_PRESETS).find(([, preset]) => (
-    preset.fontFamily === typography.fontFamily &&
-    preset.fontSizePt === typography.fontSizePt &&
-    preset.fontWeight === typography.fontWeight &&
-    preset.fontStyle === typography.fontStyle
-  ));
-  return match?.[0] ?? 'G';
+  if (typeof el.fontCode === 'string' && el.fontCode.length > 0) return el.fontCode;
+  return TPCL_FONT_METADATA[0]?.key ?? 'G';
 }
 
 const BARCODE_MAP: Record<string, string> = {
@@ -73,7 +94,10 @@ const REVERSE_BARCODE_MAP: Record<string, string> = Object.fromEntries(
 );
 
 export class TPCLDriver implements LabelDriver {
+  protocol: Protocol = 'tpcl';
   supportedExtensions = ['.etec'];
+  supportedFonts = TPCL_FONT_METADATA;
+  supportedBarcodes = TPCL_BARCODE_METADATA;
 
   generate(label: LabelTemplate): string {
     const lines: string[] = [];
@@ -261,17 +285,13 @@ export class TPCLDriver implements LabelDriver {
         const def = textDefs.get(pcId);
         if (def) {
           const content = cleanCmd.substring(commandType.length + 1);
-          const typography = TPCL_FONT_PRESETS[def.font] ?? TPCL_FONT_PRESETS.G;
           elements.push({
             id: def.id,
             type: 'text',
             x: def.x,
             y: def.y,
             rotation: def.rotation,
-            fontFamily: typography.fontFamily,
-            fontSizePt: typography.fontSizePt,
-            fontWeight: typography.fontWeight,
-            fontStyle: typography.fontStyle,
+            fontCode: def.font,
             width: def.width,
             height: def.height,
             content: content
@@ -318,10 +338,11 @@ export class TPCLDriver implements LabelDriver {
     });
 
     return {
-      name: 'Imported Label',
+      name: 'Imported TPCL',
       width,
       height,
-      elements
+      elements,
+      protocol: 'tpcl'
     };
   }
 }

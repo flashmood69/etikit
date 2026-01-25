@@ -14,10 +14,7 @@ export interface BaseElement {
 export interface TextElement extends BaseElement {
   type: 'text';
   content?: string;
-  fontFamily: string;
-  fontSizePt: number;
-  fontWeight?: 'normal' | 'bold';
-  fontStyle?: 'normal' | 'italic';
+  fontCode: string;
   width: number; // Magnification or scale
   height: number; // Magnification or scale
 }
@@ -61,16 +58,36 @@ export interface PrintSettings {
   zplDotsPerMm?: number;
 }
 
+export type Protocol = 'zpl' | 'tpcl';
+
+export interface FontMetadata {
+  key: string;
+  label: string;
+  fontFamily: string;
+  fontSizePt: number;
+  fontWeight: 'normal' | 'bold';
+  fontStyle: 'normal' | 'italic';
+}
+
+export interface BarcodeMetadata {
+  type: string;
+  label: string;
+}
+
 export interface LabelTemplate {
   name: string;
   width: number; // mm
   height: number; // mm
   elements: LabelElement[];
   printSettings?: PrintSettings;
+  protocol: Protocol;
 }
 
 export interface LabelDriver {
+  protocol: Protocol;
   generate(label: LabelTemplate): string;
   parse(content: string): LabelTemplate;
   supportedExtensions: string[];
+  supportedFonts: FontMetadata[];
+  supportedBarcodes: BarcodeMetadata[];
 }

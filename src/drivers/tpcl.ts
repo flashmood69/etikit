@@ -107,7 +107,6 @@ export class TPCLDriver implements LabelDriver {
       const normalized = value < 10 ? Math.round(value * 10) : Math.round(value);
       return Math.max(0, Math.min(99, normalized));
     };
-    const isPrefixedId = (id: unknown, prefix: string) => typeof id === 'string' && new RegExp(`^${prefix}\\d+$`).test(id);
 
     // Start with common header
     lines.push('{C|}');
@@ -126,7 +125,10 @@ export class TPCLDriver implements LabelDriver {
     const rcCommands: string[] = [];
     const graphicCommands: string[] = [];
 
-    label.elements.forEach((el, index) => {
+    let textCounter = 1;
+    let barcodeCounter = 0;
+
+    label.elements.forEach((el) => {
       const x = el.x.toString().padStart(4, '0');
       const y = el.y.toString().padStart(4, '0');
       
@@ -138,8 +140,9 @@ export class TPCLDriver implements LabelDriver {
           const h = normalizeMag(textEl.height).toString().padStart(2, '0');
           const w = normalizeMag(textEl.width).toString().padStart(2, '0');
           const font = getTpclFontId(textEl);
-          const pcId = isPrefixedId(textEl.id, 'PC') ? textEl.id : `PC${index.toString().padStart(3, '0')}`;
-          const rcId = pcId.replace(/^PC/, 'RC');
+          const pcId = `PC${textCounter.toString().padStart(3, '0')}`;
+          const rcId = `RC${textCounter.toString().padStart(3, '0')}`;
+          textCounter++;
           pcCommands.push(`{${pcId};${x},${y},${h},${w},${font},${rotationStr},B|}`);
           if (Object.prototype.hasOwnProperty.call(textEl, 'content')) {
             rcCommands.push(`{${rcId};${textEl.content ?? ''}|}`);
@@ -154,8 +157,9 @@ export class TPCLDriver implements LabelDriver {
           const rotationVal = Math.max(0, Math.min(3, Math.round(barEl.rotation || 0))).toString();
           const barcodeType = BARCODE_MAP[barEl.barcodeType] || '9';
           
-          const xbId = isPrefixedId(barEl.id, 'XB') ? barEl.id : `XB${index.toString().padStart(2, '0')}`;
-          const rbId = xbId.replace(/^XB/, 'RB');
+          const xbId = `XB${barcodeCounter.toString().padStart(2, '0')}`;
+          const rbId = `RB${barcodeCounter.toString().padStart(2, '0')}`;
+          barcodeCounter++;
           // TPCL specific defaults
           xbCommands.push(`{${xbId};${x},${y},${barcodeType},3,${narrowBar},${rotationVal},${barHeight},+0000000000,000,0,00|}`);
           xbCommands.push(`{${rbId};${barEl.content ?? ''}|}`);
@@ -168,10 +172,11 @@ export class TPCLDriver implements LabelDriver {
           const qrRotation = Math.max(0, Math.min(3, Math.round(qrEl.rotation || 0))).toString();
           const errorCorrection = qrEl.errorCorrection || 'H';
 
-          const qxId = isPrefixedId(qrEl.id, 'XB') ? qrEl.id : `XB${index.toString().padStart(2, '0')}`;
-          const qbId = qxId.replace(/^XB/, 'RB');
-          xbCommands.push(`{${qxId};${x},${y},T,${errorCorrection},${qrSize},A,${qrRotation}|}`);
-          xbCommands.push(`{${qbId};${qrEl.content ?? ''}|}`);
+          const xbId = `XB${barcodeCounter.toString().padStart(2, '0')}`;
+          const rbId = `RB${barcodeCounter.toString().padStart(2, '0')}`;
+          barcodeCounter++;
+          xbCommands.push(`{${xbId};${x},${y},T,${errorCorrection},${qrSize},A,${qrRotation}|}`);
+          xbCommands.push(`{${rbId};${qrEl.content ?? ''}|}`);
           break;
         }
 
@@ -207,7 +212,7 @@ export class TPCLDriver implements LabelDriver {
       lines.push('{XS;I,0001,0002C52200|}');
     }
 
-    return lines.join('\r\n') + '\r\n';
+    return lines.join('\r\n');
   }
 
   parse(tpcl: string): LabelTemplate {
@@ -278,7 +283,7 @@ export class TPCLDriver implements LabelDriver {
           width: parseInt(params[3]),
           font: params[4],
           rotation: parseInt(params[5]),
-          id: commandType
+          id: Math.random().toString(36).substring(2, 11)
         });
       } else if (commandType.startsWith('RC')) {
         const pcId = commandType.replace('RC', 'PC');
@@ -301,7 +306,7 @@ export class TPCLDriver implements LabelDriver {
         const params = parts[1].split(',');
         barcodeDefs.set(commandType, {
           params,
-          id: commandType
+          id: Math.random().toString(36).substring(2, 11)
         });
       } else if (commandType.startsWith('RB')) {
         const xbId = commandType.replace('RB', 'XB');

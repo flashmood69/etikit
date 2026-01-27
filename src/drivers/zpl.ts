@@ -1,7 +1,5 @@
 import {
   BarcodeElement,
-  COORDS_PER_MM,
-  DOTS_PER_MM,
   DEFAULT_DPI,
   LabelDriver,
   LabelElement,
@@ -50,7 +48,7 @@ function getZplFontCode(el: TextElement): string {
 
 export class ZPLDriver implements LabelDriver {
   protocol: Protocol = 'zpl';
-  supportedExtensions = ['.ezpl', '.zpl'];
+  supportedExtensions = ['.ezpl'];
   supportedFonts = ZPL_FONT_METADATA;
   supportedBarcodes = ZPL_BARCODE_METADATA;
 
@@ -62,7 +60,6 @@ export class ZPLDriver implements LabelDriver {
         : DEFAULT_DPI
     const targetDotsPerMm = dpi / 25.4
 
-    const coordsToDots = (coords: number) => Math.max(0, Math.round((coords * targetDotsPerMm) / COORDS_PER_MM))
     const mmToDots = (mm: number) => Math.max(0, Math.round(mm * targetDotsPerMm))
 
     const ptToDots = (pt: number) => {
@@ -71,7 +68,6 @@ export class ZPLDriver implements LabelDriver {
     }
 
     const estimateAscentDots = (fontHeightDots: number) => Math.round(fontHeightDots * 0.8)
-    const estimateAscentCoords = (fontHeightDots: number) => Math.round((estimateAscentDots(fontHeightDots) * COORDS_PER_MM) / targetDotsPerMm)
 
     const rotationToZpl = (rotation: number) => {
       const r = ((rotation || 0) % 4 + 4) % 4
@@ -114,8 +110,10 @@ export class ZPLDriver implements LabelDriver {
               : fontHeightDots
           )
         )
-        const yTop = Math.max(0, (textEl.y || 0) - estimateAscentCoords(fontHeightDots))
-        lines.push(`^FO${coordsToDots(textEl.x)},${coordsToDots(yTop)}`)
+        const xDots = Math.max(0, Math.round(textEl.x || 0))
+        const yBaselineDots = Math.round(textEl.y || 0)
+        const yTopDots = Math.max(0, yBaselineDots - estimateAscentDots(fontHeightDots))
+        lines.push(`^FO${xDots},${yTopDots}`)
         lines.push(`^A${fontCode}${rotationToZpl(textEl.rotation)},${fontHeightDots},${fontWidthDots}`)
         lines.push(`^FD${safeFieldData(textEl.content ?? '')}^FS`)
         return
@@ -124,11 +122,14 @@ export class ZPLDriver implements LabelDriver {
       if (el.type === 'barcode') {
         const barEl = el as BarcodeElement
         const orientation = rotationToZpl(barEl.rotation)
-        const heightDots = coordsToDots(barEl.height)
-        const narrowDots = Math.max(1, Math.round((barEl.width * targetDotsPerMm) / DOTS_PER_MM))
+        const xDots = Math.max(0, Math.round(barEl.x || 0))
+        const yDots = Math.max(0, Math.round(barEl.y || 0))
+        const heightDots = Math.max(1, Math.round(barEl.height || 0))
+        const narrowDots = Math.max(1, Math.round(barEl.width || 0))
+        const ratio = Math.max(1, Math.round(barEl.ratio ?? 2))
         const showText = barEl.showText === true ? 'Y' : 'N'
-        lines.push(`^FO${coordsToDots(barEl.x)},${coordsToDots(barEl.y)}`)
-        lines.push(`^BY${narrowDots},2,${heightDots}`)
+        lines.push(`^FO${xDots},${yDots}`)
+        lines.push(`^BY${narrowDots},${ratio},${heightDots}`)
         const data = safeFieldData(barEl.content ?? '')
         if (barEl.barcodeType === 'code39') {
           lines.push(`^B3${orientation},N,${heightDots},${showText},N`)
@@ -163,9 +164,11 @@ export class ZPLDriver implements LabelDriver {
       if (el.type === 'qrcode') {
         const qrEl = el as QRCodeElement
         const orientation = rotationToZpl(qrEl.rotation)
-        const magnification = Math.max(1, Math.min(20, Math.round((qrEl.size * targetDotsPerMm) / DOTS_PER_MM)))
+        const xDots = Math.max(0, Math.round(qrEl.x || 0))
+        const yDots = Math.max(0, Math.round(qrEl.y || 0))
+        const magnification = Math.max(1, Math.min(20, Math.round(qrEl.size || 0)))
         const ec = (qrEl.errorCorrection || 'H') as string
-        lines.push(`^FO${coordsToDots(qrEl.x)},${coordsToDots(qrEl.y)}`)
+        lines.push(`^FO${xDots},${yDots}`)
         lines.push(`^BQ${orientation},2,${magnification},${ec},7`)
         lines.push(`^FDLA,${safeFieldData(qrEl.content ?? '')}^FS`)
         return
@@ -173,10 +176,12 @@ export class ZPLDriver implements LabelDriver {
 
       if (el.type === 'rectangle') {
         const rectEl = el as RectangleElement
-        const wDots = coordsToDots(rectEl.width)
-        const hDots = coordsToDots(rectEl.height)
-        const tDots = Math.max(1, Math.round((rectEl.thickness * targetDotsPerMm) / DOTS_PER_MM))
-        lines.push(`^FO${coordsToDots(rectEl.x)},${coordsToDots(rectEl.y)}`)
+        const xDots = Math.max(0, Math.round(rectEl.x || 0))
+        const yDots = Math.max(0, Math.round(rectEl.y || 0))
+        const wDots = Math.max(1, Math.round(rectEl.width || 0))
+        const hDots = Math.max(1, Math.round(rectEl.height || 0))
+        const tDots = Math.max(1, Math.round(rectEl.thickness || 0))
+        lines.push(`^FO${xDots},${yDots}`)
         lines.push(`^GB${wDots},${hDots},${tDots},B,0^FS`)
         return
       }
@@ -185,14 +190,14 @@ export class ZPLDriver implements LabelDriver {
         const lineEl = el as LineElement
         const dx = lineEl.x2 - lineEl.x
         const dy = lineEl.y2 - lineEl.y
-        const tDots = Math.max(1, Math.round((lineEl.thickness * targetDotsPerMm) / DOTS_PER_MM))
+        const tDots = Math.max(1, Math.round(lineEl.thickness || 0))
 
         const xMin = Math.min(lineEl.x, lineEl.x2)
         const yMin = Math.min(lineEl.y, lineEl.y2)
-        const wDots = Math.max(1, coordsToDots(Math.abs(dx)))
-        const hDots = Math.max(1, coordsToDots(Math.abs(dy)))
+        const wDots = Math.max(1, Math.round(Math.abs(dx)))
+        const hDots = Math.max(1, Math.round(Math.abs(dy)))
 
-        lines.push(`^FO${coordsToDots(xMin)},${coordsToDots(yMin)}`)
+        lines.push(`^FO${Math.max(0, Math.round(xMin))},${Math.max(0, Math.round(yMin))}`)
         if (dx === 0 || dy === 0) {
           const boxW = dx === 0 ? tDots : wDots
           const boxH = dy === 0 ? tDots : hDots
@@ -211,8 +216,6 @@ export class ZPLDriver implements LabelDriver {
   }
 
   parse(content: string): LabelTemplate {
-    const MM_PER_PT = 25.4 / 72
-    const TEXT_FONT_SIZE_SCALE = 1.4
     const ASCENT_RATIO = 0.8
 
     const zplToRotation = (o?: string) => {
@@ -223,7 +226,6 @@ export class ZPLDriver implements LabelDriver {
       return 0
     }
 
-    const normalizeTextScale = (val: number) => (val >= 10 ? val / 10 : (val <= 0 ? 1 : val))
     const estimateAscentDots = (fontHeightDots: number) => Math.round(fontHeightDots * ASCENT_RATIO)
 
     const start = content.indexOf('^XA')
@@ -232,7 +234,7 @@ export class ZPLDriver implements LabelDriver {
 
     type FieldRecord =
       | { kind: 'text'; foX: number; foY: number; fontCode: string; o: string; hDots: number; wDots: number; data: string }
-      | { kind: 'barcode'; foX: number; foY: number; type: BarcodeElement['barcodeType']; o: string; hDots: number; showText: boolean; narrowDots: number; data: string }
+      | { kind: 'barcode'; foX: number; foY: number; type: BarcodeElement['barcodeType']; o: string; hDots: number; showText: boolean; narrowDots: number; ratio: number; data: string }
       | { kind: 'qrcode'; foX: number; foY: number; o: string; mag: number; ec?: string; data: string }
       | { kind: 'gb'; foX: number; foY: number; wDots: number; hDots: number; tDots: number }
       | { kind: 'gd'; foX: number; foY: number; wDots: number; hDots: number; tDots: number; o?: string }
@@ -415,6 +417,7 @@ export class ZPLDriver implements LabelDriver {
         } else if (pending.kind === 'barcode') {
           const data = pendingData ?? ''
           const narrow = Math.max(1, currentBy?.w ?? 2)
+          const ratio = Math.max(1, currentBy?.r ?? 2)
           const moduleCount = (() => {
             if (pending.type === 'code39') return (data.length || 1) * 13 + 35
             if (pending.type === 'ean13') return 95
@@ -433,6 +436,7 @@ export class ZPLDriver implements LabelDriver {
             hDots: pending.hDots,
             showText: pending.showText,
             narrowDots: narrow,
+            ratio,
             data
           })
         } else if (pending.kind === 'qrcode') {
@@ -527,13 +531,6 @@ export class ZPLDriver implements LabelDriver {
     const sourceDotsPerMm = inferDotsPerMm(widthDotsForInference, heightDotsForInference, textHeightsDots)
 
     const dotsToMm = (dots: number) => dots / sourceDotsPerMm
-    const dotsToCoords = (dots: number) => Math.round(dotsToMm(dots) * COORDS_PER_MM)
-    const dotsToPt = (dots: number) => (dotsToMm(dots) / MM_PER_PT)
-    const dotsToBaseDots = (dots: number) => Math.max(1, Math.round((dots * DOTS_PER_MM) / sourceDotsPerMm))
-    const ptToDots = (pt: number) => {
-      const mm = (pt * MM_PER_PT) * TEXT_FONT_SIZE_SCALE
-      return Math.max(1, Math.round(mm * sourceDotsPerMm))
-    }
 
     const marginDots = Math.round(10 * sourceDotsPerMm)
     if (hasPW && pwDots !== null) widthMm = dotsToMm(pwDots)
@@ -556,19 +553,18 @@ export class ZPLDriver implements LabelDriver {
     const elements: LabelElement[] = []
     for (const field of fields) {
       const id = Math.random().toString(36).substring(2, 11)
-      const xCoords = dotsToCoords(field.foX)
-      const yCoordsTop = dotsToCoords(field.foY)
+      const xDots = Math.max(0, Math.round(field.foX))
+      const yDotsTop = Math.max(0, Math.round(field.foY))
 
       if (field.kind === 'text') {
         const yBaselineDots = field.foY + estimateAscentDots(field.hDots)
-        const yBaseline = dotsToCoords(yBaselineDots)
         const fontCode = field.fontCode || '0'
 
         const textEl: TextElement = {
           id,
           type: 'text',
-          x: xCoords,
-          y: yBaseline,
+          x: xDots,
+          y: Math.max(0, Math.round(yBaselineDots)),
           rotation: zplToRotation(field.o),
           content: field.data,
           fontCode,
@@ -583,14 +579,15 @@ export class ZPLDriver implements LabelDriver {
         const barEl: BarcodeElement = {
           id,
           type: 'barcode',
-          x: xCoords,
-          y: yCoordsTop,
+          x: xDots,
+          y: yDotsTop,
           rotation: zplToRotation(field.o),
           content: field.data,
           barcodeType: field.type,
-          width: dotsToBaseDots(field.narrowDots),
-          height: dotsToCoords(field.hDots),
-          showText: field.showText
+          width: Math.max(1, Math.round(field.narrowDots)),
+          height: Math.max(1, Math.round(field.hDots)),
+          ratio: Math.max(1, Math.round(field.ratio)),
+          showText: field.showText,
         }
         elements.push(barEl)
         continue
@@ -600,11 +597,11 @@ export class ZPLDriver implements LabelDriver {
         const qrEl: QRCodeElement = {
           id,
           type: 'qrcode',
-          x: xCoords,
-          y: yCoordsTop,
+          x: xDots,
+          y: yDotsTop,
           rotation: zplToRotation(field.o),
           content: field.data,
-          size: Math.max(1, Math.min(20, dotsToBaseDots(field.mag))),
+          size: Math.max(1, Math.min(20, Math.round(field.mag))),
           errorCorrection: (field.ec as any) || 'H'
         }
         elements.push(qrEl)
@@ -612,21 +609,21 @@ export class ZPLDriver implements LabelDriver {
       }
 
       if (field.kind === 'gb') {
-        const wCoords = dotsToCoords(field.wDots)
-        const hCoords = dotsToCoords(field.hDots)
-        const t = dotsToBaseDots(field.tDots)
+        const wDots = Math.max(1, Math.round(field.wDots))
+        const hDots = Math.max(1, Math.round(field.hDots))
+        const tDots = Math.max(1, Math.round(field.tDots))
 
         if (field.wDots <= field.tDots || field.hDots <= field.tDots) {
           const isVertical = field.wDots <= field.tDots
           const lineEl: LineElement = {
             id,
             type: 'line',
-            x: xCoords,
-            y: yCoordsTop,
+            x: xDots,
+            y: yDotsTop,
             rotation: 0,
-            x2: xCoords + (isVertical ? 0 : wCoords),
-            y2: yCoordsTop + (isVertical ? hCoords : 0),
-            thickness: t
+            x2: xDots + (isVertical ? 0 : wDots),
+            y2: yDotsTop + (isVertical ? hDots : 0),
+            thickness: tDots
           }
           elements.push(lineEl)
           continue
@@ -635,31 +632,31 @@ export class ZPLDriver implements LabelDriver {
         const rectEl: RectangleElement = {
           id,
           type: 'rectangle',
-          x: xCoords,
-          y: yCoordsTop,
+          x: xDots,
+          y: yDotsTop,
           rotation: 0,
-          width: wCoords,
-          height: hCoords,
-          thickness: t
+          width: wDots,
+          height: hDots,
+          thickness: tDots
         }
         elements.push(rectEl)
         continue
       }
 
       if (field.kind === 'gd') {
-        const wCoords = dotsToCoords(field.wDots)
-        const hCoords = dotsToCoords(field.hDots)
+        const wDots = Math.max(1, Math.round(field.wDots))
+        const hDots = Math.max(1, Math.round(field.hDots))
         const orient = (field.o || 'R').toUpperCase()
 
         const lineEl: LineElement = {
           id,
           type: 'line',
-          x: xCoords,
-          y: yCoordsTop,
+          x: xDots,
+          y: yDotsTop,
           rotation: 0,
-          x2: xCoords + wCoords,
-          y2: yCoordsTop + (orient === 'L' ? 0 : hCoords),
-          thickness: dotsToBaseDots(field.tDots)
+          x2: xDots + wDots,
+          y2: yDotsTop + (orient === 'L' ? 0 : hDots),
+          thickness: Math.max(1, Math.round(field.tDots))
         }
         elements.push(lineEl)
       }

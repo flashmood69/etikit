@@ -161,10 +161,20 @@ function getFontMetricsPx(font: { fontSizePx: number; fontWeight: number | strin
   return result;
 }
 
-function getLineBoundingBoxPx(lineEl: LineElement, zoom: number) {
-  const dx = (lineEl.x2 - lineEl.x) / COORDS_PER_MM * zoom;
-  const dy = (lineEl.y2 - lineEl.y) / COORDS_PER_MM * zoom;
-  const thicknessPx = Math.max(0.5, (lineEl.thickness / DOTS_PER_MM) * zoom);
+function getLineBoundingBoxPx(lineEl: LineElement, zoom: number, protocol: Protocol, printSettings: PrintSettings) {
+  const dotsPerMm = getDpi(printSettings) / 25.4
+  const dx = protocol === 'zpl'
+    ? ((lineEl.x2 - lineEl.x) / dotsPerMm) * zoom
+    : ((lineEl.x2 - lineEl.x) / COORDS_PER_MM) * zoom
+  const dy = protocol === 'zpl'
+    ? ((lineEl.y2 - lineEl.y) / dotsPerMm) * zoom
+    : ((lineEl.y2 - lineEl.y) / COORDS_PER_MM) * zoom
+  const thicknessPx = Math.max(
+    0.5,
+    protocol === 'zpl'
+      ? (Math.max(1, lineEl.thickness) / dotsPerMm) * zoom
+      : (lineEl.thickness / DOTS_PER_MM) * zoom
+  )
   const minX = Math.min(0, dx);
   const minY = Math.min(0, dy);
   const maxX = Math.max(0, dx);
@@ -175,15 +185,17 @@ function getLineBoundingBoxPx(lineEl: LineElement, zoom: number) {
 }
 
 function getElementSize(element: LabelElement, zoom: number, supportedFonts: FontMetadata[], protocol: Protocol, printSettings: PrintSettings) {
-  const dotsToPx = (dots: number) => (dots / DOTS_PER_MM) * zoom;
-  const coordsToPx = (coords: number) => (coords / COORDS_PER_MM) * zoom;
+  const dotsPerMm = getDpi(printSettings) / 25.4
+  const baseDotsToPx = (baseDots: number) => (baseDots / DOTS_PER_MM) * zoom
+  const coordsToPx = (coords: number) => (coords / COORDS_PER_MM) * zoom
+  const zplDotsToPx = (dots: number) => (dots / dotsPerMm) * zoom
   
   if (element.type === 'text') {
     const textEl = element as TextElement;
     const font = getTextFontStyle(textEl, zoom, supportedFonts, protocol, printSettings);
     const { scaleX, scaleY } = getTextScales(textEl, protocol);
     
-    const lines = (element.content || '').split('\n');
+    const lines = ((element.content && element.content.length > 0) ? element.content : '\u00A0').split('\n');
     let maxLineWidth = 0;
     
     const canvas = document.createElement('canvas');
@@ -202,23 +214,29 @@ function getElementSize(element: LabelElement, zoom: number, supportedFonts: Fon
     return { width: maxLineWidth * scaleX, height: lines.length * lineHeightPx * scaleY };
   }
   if (element.type === 'barcode') {
-    const targetModuleWidthPx = dotsToPx(element.width);
-    const barHeightPx = Math.max(1, coordsToPx(element.height));
+    const targetModuleWidthPx = protocol === 'zpl' ? zplDotsToPx(element.width) : baseDotsToPx(element.width)
+    const barHeightPx = Math.max(1, protocol === 'zpl' ? zplDotsToPx(element.height) : coordsToPx(element.height))
     const modules = (element.content?.length ?? 0) * 11 + 35;
     return { width: modules * targetModuleWidthPx, height: barHeightPx };
   }
   if (element.type === 'qrcode') {
     const qrEl = element as QRCodeElement;
-    const moduleSizePx = dotsToPx(qrEl.size);
+    const moduleSizePx = protocol === 'zpl' ? zplDotsToPx(qrEl.size) : baseDotsToPx(qrEl.size)
     const modules = 21;
     const sizePx = modules * moduleSizePx;
     return { width: sizePx, height: sizePx };
   }
   if (element.type === 'line') {
-    const { width, height } = getLineBoundingBoxPx(element as LineElement, zoom);
+    const { width, height } = getLineBoundingBoxPx(element as LineElement, zoom, protocol, printSettings);
     return { width, height };
   }
   if (element.type === 'rectangle') {
+    if (protocol === 'zpl') {
+      return {
+        width: zplDotsToPx(element.width),
+        height: zplDotsToPx(element.height)
+      }
+    }
     return { 
       width: coordsToPx(element.width), 
       height: coordsToPx(element.height) 
@@ -350,9 +368,9 @@ function App() {
   };
 
   const handleDrag = (id: string, data: { x: number, y: number }) => {
-    // Convert px to 0.1mm units (COORDS_PER_MM)
-    const x = Math.round(data.x / zoom * COORDS_PER_MM);
-    const y = Math.round(data.y / zoom * COORDS_PER_MM);
+    const unitsPerMm = protocol === 'zpl' ? (getDpi(printSettings) / 25.4) : COORDS_PER_MM
+    const x = Math.round((data.x / zoom) * unitsPerMm)
+    const y = Math.round((data.y / zoom) * unitsPerMm)
     updateElement(id, { x, y });
   };
 
@@ -516,7 +534,7 @@ function App() {
             setProtocol(template.protocol);
           } else {
             const lower = file.name.toLowerCase()
-            if (lower.endsWith('.ezpl') || lower.endsWith('.zpl')) setProtocol('zpl')
+            if (lower.endsWith('.ezpl')) setProtocol('zpl')
             if (lower.endsWith('.etec')) setProtocol('tpcl')
           }
           setSelectedId(null);
@@ -604,7 +622,7 @@ function App() {
           <label className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50 transition-colors cursor-pointer">
             <Upload size={16} />
             Load
-            <input type="file" accept=".json,.etec,.ezpl,.zpl" className="hidden" onChange={loadTemplate} />
+            <input type="file" accept=".json,.etec,.ezpl" className="hidden" onChange={loadTemplate} />
           </label>
           <button onClick={saveTemplate} className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50 transition-colors">
             <Save size={16} />
@@ -1219,8 +1237,9 @@ function DraggableElement({ element, zoom, protocol, printSettings, supportedFon
   const translateX = (rotation === 1) ? rawHeight : (rotation === 2 ? rawWidth : (rotation === 3 ? 0 : 0));
   const translateY = (rotation === 1) ? 0 : (rotation === 2 ? rawHeight : (rotation === 3 ? rawWidth : 0));
 
-  const x = (element.x / COORDS_PER_MM) * zoom;
-  const y = (element.y / COORDS_PER_MM) * zoom;
+  const dotsPerMm = getDpi(printSettings) / 25.4
+  const x = protocol === 'zpl' ? (element.x / dotsPerMm) * zoom : (element.x / COORDS_PER_MM) * zoom
+  const y = protocol === 'zpl' ? (element.y / dotsPerMm) * zoom : (element.y / COORDS_PER_MM) * zoom
 
   const baselineOffsetPx = (() => {
     if (element.type !== 'text') return 0;
@@ -1284,7 +1303,10 @@ function ElementRenderer({ element, zoom, protocol, printSettings, supportedFont
   const rotation = ((element.rotation || 0) % 4 + 4) % 4;
   const rotationDegrees = rotation * 90;
 
-  const dotsToPx = (dots: number) => (dots / DOTS_PER_MM) * zoom;
+  const dotsPerMm = getDpi(printSettings) / 25.4
+  const baseDotsToPx = (baseDots: number) => (baseDots / DOTS_PER_MM) * zoom
+  const coordsToPx = (coords: number) => (coords / COORDS_PER_MM) * zoom
+  const zplDotsToPx = (dots: number) => (dots / dotsPerMm) * zoom
 
   const renderContent = () => {
     switch (element.type) {
@@ -1307,14 +1329,14 @@ function ElementRenderer({ element, zoom, protocol, printSettings, supportedFont
               color: 'black',
             }}
           >
-            {textEl.content}
+            {(textEl.content && textEl.content.length > 0) ? textEl.content : '\u00A0'}
           </div>
         );
       }
       case 'barcode': {
         const barEl = element as BarcodeElement;
-        const targetModuleWidthPx = dotsToPx(barEl.width);
-        const barHeightPx = Math.max(1, (barEl.height / COORDS_PER_MM) * zoom);
+        const targetModuleWidthPx = protocol === 'zpl' ? zplDotsToPx(barEl.width) : baseDotsToPx(barEl.width)
+        const barHeightPx = Math.max(1, protocol === 'zpl' ? zplDotsToPx(barEl.height) : coordsToPx(barEl.height))
         
         // Standard barcode modules calculation for Code128/others
         const modules = (barEl.content?.length ?? 0) * 11 + 35;
@@ -1345,7 +1367,7 @@ function ElementRenderer({ element, zoom, protocol, printSettings, supportedFont
       }
       case 'qrcode': {
         const qrEl = element as QRCodeElement;
-        const moduleSizePx = dotsToPx(qrEl.size);
+        const moduleSizePx = protocol === 'zpl' ? zplDotsToPx(qrEl.size) : baseDotsToPx(qrEl.size)
         const sizePx = 21 * moduleSizePx;
         
         return (
@@ -1361,7 +1383,7 @@ function ElementRenderer({ element, zoom, protocol, printSettings, supportedFont
       }
       case 'line': {
         const lineEl = element as LineElement;
-        const { dx, dy, thicknessPx, minX, minY, width, height } = getLineBoundingBoxPx(lineEl, zoom);
+        const { dx, dy, thicknessPx, minX, minY, width, height } = getLineBoundingBoxPx(lineEl, zoom, protocol, printSettings);
         const x1 = (-minX) + thicknessPx / 2;
         const y1 = (-minY) + thicknessPx / 2;
         const x2 = (dx - minX) + thicknessPx / 2;
@@ -1386,9 +1408,9 @@ function ElementRenderer({ element, zoom, protocol, printSettings, supportedFont
       }
       case 'rectangle': {
         const rectEl = element as RectangleElement;
-        const w = (rectEl.width / COORDS_PER_MM) * zoom;
-        const h = (rectEl.height / COORDS_PER_MM) * zoom;
-        const t = Math.max(0.5, dotsToPx(rectEl.thickness));
+        const w = protocol === 'zpl' ? zplDotsToPx(rectEl.width) : coordsToPx(rectEl.width)
+        const h = protocol === 'zpl' ? zplDotsToPx(rectEl.height) : coordsToPx(rectEl.height)
+        const t = Math.max(0.5, protocol === 'zpl' ? zplDotsToPx(rectEl.thickness) : baseDotsToPx(rectEl.thickness))
         return (
           <div 
             style={{ 

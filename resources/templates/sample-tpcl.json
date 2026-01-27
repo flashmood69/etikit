@@ -4,49 +4,49 @@
   "height": 63,
   "elements": [
     {
-      "id": "sgx833qaz",
+      "id": "2t4e6p9ic",
       "type": "barcode",
-      "x": 36,
+      "x": 33,
       "y": 460,
       "rotation": 3,
       "barcodeType": "code128",
       "width": 3,
       "height": 200,
-      "content": "26018011/5"
+      "content": "26000000/0"
     },
     {
-      "id": "mfr8a0j9t",
+      "id": "z2clftv2x",
       "type": "qrcode",
       "x": 800,
       "y": 150,
       "rotation": 1,
       "size": 5,
-      "content": "000100000123",
+      "content": "900000123",
       "errorCorrection": "H"
     },
     {
-      "id": "6d1hag69a",
+      "id": "jssylu4bj",
       "type": "qrcode",
       "x": 1010,
-      "y": 55,
+      "y": 53,
       "rotation": 1,
       "size": 3,
-      "content": "ABC012345-VERS. 01",
+      "content": "ABC012345-VERS01",
       "errorCorrection": "H"
     },
     {
-      "id": "isesq4qxh",
+      "id": "op9ht2bvj",
       "type": "text",
-      "x": 245,
+      "x": 253,
       "y": 355,
       "rotation": 0,
       "fontCode": "Q",
       "width": 10,
       "height": 10,
-      "content": "26018011/5"
+      "content": "26000000/0"
     },
     {
-      "id": "it3upovo6",
+      "id": "3kcqcl27q",
       "type": "text",
       "x": 253,
       "y": 230,
@@ -54,10 +54,10 @@
       "fontCode": "G",
       "width": 10,
       "height": 10,
-      "content": "Requested Quantity"
+      "content": "Quant. Richiesta"
     },
     {
-      "id": "sbefuf38d",
+      "id": "2ptbi9rhl",
       "type": "text",
       "x": 253,
       "y": 286,
@@ -65,10 +65,10 @@
       "fontCode": "H",
       "width": 10,
       "height": 10,
-      "content": "30,21 kg"
+      "content": "125,875 kg"
     },
     {
-      "id": "9aeq0yo32",
+      "id": "7cuxeff2o",
       "type": "text",
       "x": 253,
       "y": 37,
@@ -79,7 +79,7 @@
       "content": "ABC012345"
     },
     {
-      "id": "a4gpwonqm",
+      "id": "abgl9edji",
       "type": "text",
       "x": 863,
       "y": 235,
@@ -87,10 +87,10 @@
       "fontCode": "G",
       "width": 10,
       "height": 10,
-      "content": "18/01/2026"
+      "content": "27/01/2026"
     },
     {
-      "id": "s3x03kdlv",
+      "id": "noktekaq3",
       "type": "text",
       "x": 863,
       "y": 188,
@@ -98,10 +98,10 @@
       "fontCode": "G",
       "width": 10,
       "height": 10,
-      "content": "Date"
+      "content": "Data"
     },
     {
-      "id": "gkxjjlc1w",
+      "id": "di1kkbwif",
       "type": "text",
       "x": 253,
       "y": 482,
@@ -109,10 +109,10 @@
       "fontCode": "G",
       "width": 10,
       "height": 10,
-      "content": "5/6 Beacker"
+      "content": "0/6 POT MANUAL"
     },
     {
-      "id": "59pomloz2",
+      "id": "u9hukkmkx",
       "type": "text",
       "x": 253,
       "y": 532,
@@ -120,10 +120,10 @@
       "fontCode": "Q",
       "width": 10,
       "height": 10,
-      "content": "0,57399 kg"
+      "content": "0 kg   H"
     },
     {
-      "id": "t57kdv5yh",
+      "id": "veg2vyd64",
       "type": "text",
       "x": 433,
       "y": 584,
@@ -131,10 +131,10 @@
       "fontCode": "R",
       "width": 10,
       "height": 10,
-      "content": ""
+      "content": "TEST-BB"
     },
     {
-      "id": "xx4mkuvqe",
+      "id": "n87jg2oem",
       "type": "text",
       "x": 33,
       "y": 584,
@@ -142,21 +142,21 @@
       "fontCode": "H",
       "width": 10,
       "height": 10,
-      "content": "MWS 05 "
+      "content": "TEST-AA"
     },
     {
-      "id": "10jr9owgu",
+      "id": "1a8u36gpk",
       "type": "text",
-      "x": 245,
+      "x": 253,
       "y": 422,
       "rotation": 0,
       "fontCode": "H",
       "width": 10,
       "height": 10,
-      "content": ""
+      "content": "TEST-CC"
     },
     {
-      "id": "q47fseji3",
+      "id": "6nts2c0s3",
       "type": "text",
       "x": 253,
       "y": 180,
@@ -164,10 +164,10 @@
       "fontCode": "G",
       "width": 10,
       "height": 10,
-      "content": "VERS. 01"
+      "content": "VERS01"
     },
     {
-      "id": "sg4cjfscg",
+      "id": "gq4ztqtgs",
       "type": "text",
       "x": 253,
       "y": 84,
@@ -178,7 +178,7 @@
       "content": "SIERRA BRAVO TANGO"
     },
     {
-      "id": "jcvqn53pq",
+      "id": "gcuts7yzb",
       "type": "text",
       "x": 253,
       "y": 134,
@@ -186,21 +186,21 @@
       "fontCode": "R",
       "width": 10,
       "height": 10,
-      "content": "000100000123"
+      "content": "900000123"
     },
     {
-      "id": "4lmedehvo",
+      "id": "8qge3g1zp",
       "type": "text",
-      "x": 840,
-      "y": 40,
+      "x": 730,
+      "y": 37,
       "rotation": 0,
-      "fontCode": "G",
+      "fontCode": "H",
       "width": 10,
       "height": 10,
-      "content": "A260000123"
+      "content": "A260001234"
     },
     {
-      "id": "zc5q0jq00",
+      "id": "bb8i37l4h",
       "type": "text",
       "x": 603,
       "y": 408,
@@ -208,10 +208,10 @@
       "fontCode": "G",
       "width": 10,
       "height": 10,
-      "content": ""
+      "content": "TEST-DD"
     },
     {
-      "id": "ye8tm52pa",
+      "id": "0wk8a0980",
       "type": "text",
       "x": 603,
       "y": 447,
@@ -219,10 +219,10 @@
       "fontCode": "G",
       "width": 10,
       "height": 10,
-      "content": ""
+      "content": "TEST-EE"
     },
     {
-      "id": "ly4zheesr",
+      "id": "s5p2h033l",
       "type": "text",
       "x": 800,
       "y": 555,
@@ -230,10 +230,10 @@
       "fontCode": "G",
       "width": 10,
       "height": 10,
-      "content": "J.DOE"
+      "content": "JMOONHOUSE"
     },
     {
-      "id": "k0irgc6il",
+      "id": "q90siziyc",
       "type": "rectangle",
       "x": 241,
       "y": 0,
@@ -243,7 +243,7 @@
       "thickness": 3
     },
     {
-      "id": "8vobefflq",
+      "id": "c078frjz9",
       "type": "rectangle",
       "x": 589,
       "y": 306,
@@ -253,7 +253,7 @@
       "thickness": 3
     },
     {
-      "id": "v94hpp232",
+      "id": "0m1qt9n4a",
       "type": "line",
       "x": 842,
       "y": 136,
@@ -263,22 +263,22 @@
       "thickness": 3
     },
     {
-      "id": "ghprytuqn",
+      "id": "6bm5eritx",
       "type": "line",
       "x": 241,
       "y": 304,
       "rotation": 0,
-      "x2": 596,
+      "x2": 593,
       "y2": 304,
       "thickness": 5
     },
     {
-      "id": "ak3idhk20",
+      "id": "rt1d13p3n",
       "type": "line",
-      "x": 590,
+      "x": 588,
       "y": 496,
       "rotation": 0,
-      "x2": 1020,
+      "x2": 1010,
       "y2": 496,
       "thickness": 7
     }

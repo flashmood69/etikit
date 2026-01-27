@@ -26,6 +26,7 @@ export interface BarcodeElement extends BaseElement {
   barcodeType: string; // Generic type like 'code128', 'ean13'
   height: number;
   width: number; // Narrow bar width
+  ratio?: number;
   showText?: boolean;
 }
 

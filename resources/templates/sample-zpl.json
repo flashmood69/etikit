@@ -4,20 +4,20 @@
   "height": 70.1,
   "elements": [
     {
-      "id": "06k3gppw2",
+      "id": "b71ax97oo",
       "type": "qrcode",
-      "x": 42,
-      "y": 254,
+      "x": 99,
+      "y": 600,
       "rotation": 0,
       "content": "26000000/0",
-      "size": 3,
+      "size": 9,
       "errorCorrection": "M"
     },
     {
-      "id": "n402fjp79",
+      "id": "ntdk8vgku",
       "type": "text",
-      "x": 254,
-      "y": 83,
+      "x": 600,
+      "y": 195,
       "rotation": 0,
       "content": "ABC012345",
       "fontCode": "0",
@@ -25,10 +25,10 @@
       "height": 120
     },
     {
-      "id": "nwolwazxt",
+      "id": "m0bn99ftr",
       "type": "text",
-      "x": 254,
-      "y": 120,
+      "x": 600,
+      "y": 284,
       "rotation": 0,
       "content": "SIERRA BRAVO TANGO",
       "fontCode": "0",
@@ -36,10 +36,10 @@
       "height": 80
     },
     {
-      "id": "0ym075u20",
+      "id": "ip8ctjv7p",
       "type": "text",
-      "x": 254,
-      "y": 168,
+      "x": 600,
+      "y": 396,
       "rotation": 0,
       "content": "900000123",
       "fontCode": "0",
@@ -47,10 +47,10 @@
       "height": 120
     },
     {
-      "id": "8vnrddphn",
+      "id": "r6m91kftw",
       "type": "text",
-      "x": 254,
-      "y": 209,
+      "x": 600,
+      "y": 494,
       "rotation": 0,
       "content": "VERS01",
       "fontCode": "0",
@@ -58,10 +58,10 @@
       "height": 80
     },
     {
-      "id": "833k3vpok",
+      "id": "thq4gxesh",
       "type": "text",
-      "x": 762,
-      "y": 203,
+      "x": 1800,
+      "y": 479,
       "rotation": 0,
       "content": "Date",
       "fontCode": "0",
@@ -69,10 +69,10 @@
       "height": 100
     },
     {
-      "id": "89fa013mt",
+      "id": "j216pmzd8",
       "type": "text",
-      "x": 762,
-      "y": 246,
+      "x": 1800,
+      "y": 581,
       "rotation": 0,
       "content": "27/01/2026",
       "fontCode": "0",
@@ -80,10 +80,10 @@
       "height": 100
     },
     {
-      "id": "uv9w5g2e8",
+      "id": "1wr4rr023",
       "type": "text",
-      "x": 254,
-      "y": 281,
+      "x": 600,
+      "y": 664,
       "rotation": 0,
       "content": "Requested quantity",
       "fontCode": "0",
@@ -91,10 +91,10 @@
       "height": 80
     },
     {
-      "id": "z8c3du5mn",
+      "id": "gfv8qz23x",
       "type": "text",
-      "x": 254,
-      "y": 322,
+      "x": 600,
+      "y": 760,
       "rotation": 0,
       "content": "125.875 kg",
       "fontCode": "0",
@@ -102,10 +102,10 @@
       "height": 100
     },
     {
-      "id": "xuw595mf8",
+      "id": "vqwmjd41f",
       "type": "text",
-      "x": 254,
-      "y": 373,
+      "x": 600,
+      "y": 881,
       "rotation": 0,
       "content": "26000000/0",
       "fontCode": "0",
@@ -113,10 +113,10 @@
       "height": 100
     },
     {
-      "id": "u9z80wgyr",
+      "id": "o5mi06486",
       "type": "text",
-      "x": 466,
-      "y": 373,
+      "x": 1101,
+      "y": 881,
       "rotation": 0,
       "content": "Test",
       "fontCode": "0",
@@ -124,10 +124,10 @@
       "height": 100
     },
     {
-      "id": "ngiorb5j1",
+      "id": "96e5r5c4u",
       "type": "text",
-      "x": 254,
-      "y": 423,
+      "x": 600,
+      "y": 999,
       "rotation": 0,
       "content": "",
       "fontCode": "0",
@@ -135,10 +135,10 @@
       "height": 100
     },
     {
-      "id": "h90vdji6d",
+      "id": "mvyvviiyl",
       "type": "text",
-      "x": 254,
-      "y": 485,
+      "x": 600,
+      "y": 1145,
       "rotation": 0,
       "content": "0/3 POT MWS",
       "fontCode": "0",
@@ -146,10 +146,10 @@
       "height": 120
     },
     {
-      "id": "1fi7lwdj8",
+      "id": "bqr1onv7m",
       "type": "text",
-      "x": 254,
-      "y": 549,
+      "x": 600,
+      "y": 1296,
       "rotation": 0,
       "content": "0 kg   ",
       "fontCode": "0",
@@ -157,10 +157,10 @@
       "height": 120
     },
     {
-      "id": "ovjpliffz",
+      "id": "dia2q0iro",
       "type": "text",
-      "x": 635,
-      "y": 464,
+      "x": 1500,
+      "y": 1095,
       "rotation": 0,
       "content": "40 ABC +XYZ",
       "fontCode": "0",
@@ -168,10 +168,10 @@
       "height": 120
     },
     {
-      "id": "no5k8dx7g",
+      "id": "2e7u9554q",
       "type": "text",
-      "x": 635,
-      "y": 506,
+      "x": 1500,
+      "y": 1194,
       "rotation": 0,
       "content": "",
       "fontCode": "0",
@@ -179,10 +179,10 @@
       "height": 120
     },
     {
-      "id": "c85xv296h",
+      "id": "3zwbtpk5j",
       "type": "text",
-      "x": 635,
-      "y": 549,
+      "x": 1500,
+      "y": 1296,
       "rotation": 0,
       "content": "",
       "fontCode": "0",
@@ -190,10 +190,10 @@
       "height": 120
     },
     {
-      "id": "dho88xih2",
+      "id": "5pqxksc8r",
       "type": "text",
-      "x": 42,
-      "y": 591,
+      "x": 99,
+      "y": 1395,
       "rotation": 0,
       "content": "",
       "fontCode": "0",
@@ -201,10 +201,10 @@
       "height": 120
     },
     {
-      "id": "stlm1lo4d",
+      "id": "07ti2ksgc",
       "type": "text",
-      "x": 466,
-      "y": 591,
+      "x": 1101,
+      "y": 1395,
       "rotation": 0,
       "content": "",
       "fontCode": "0",
@@ -212,55 +212,56 @@
       "height": 120
     },
     {
-      "id": "mltnfgso3",
+      "id": "g0ft9m67t",
       "type": "line",
-      "x": 601,
-      "y": 381,
+      "x": 1420,
+      "y": 900,
       "rotation": 0,
-      "x2": 1024,
-      "y2": 381,
-      "thickness": 1
+      "x2": 2419,
+      "y2": 900,
+      "thickness": 3
     },
     {
-      "id": "0f8s63k3z",
+      "id": "wffjl3g34",
       "type": "line",
-      "x": 237,
-      "y": 330,
+      "x": 560,
+      "y": 780,
       "rotation": 0,
-      "x2": 601,
-      "y2": 330,
-      "thickness": 1
+      "x2": 1420,
+      "y2": 780,
+      "thickness": 3
     },
     {
-      "id": "pcjhpf3vs",
+      "id": "iuy2nd024",
       "type": "line",
-      "x": 601,
-      "y": 330,
+      "x": 1420,
+      "y": 780,
       "rotation": 0,
-      "x2": 601,
-      "y2": 542,
-      "thickness": 1
+      "x2": 1420,
+      "y2": 1281,
+      "thickness": 3
     },
     {
-      "id": "dzizsb66x",
+      "id": "yu0f54tn7",
       "type": "line",
-      "x": 237,
-      "y": 42,
+      "x": 560,
+      "y": 99,
       "rotation": 0,
-      "x2": 237,
-      "y2": 550,
-      "thickness": 1
+      "x2": 560,
+      "y2": 1299,
+      "thickness": 3
     },
     {
-      "id": "vgveyj0di",
+      "id": "ri4pub4lt",
       "type": "barcode",
-      "x": 635,
-      "y": 288,
+      "x": 1500,
+      "y": 680,
       "rotation": 0,
       "content": "900000123",
       "barcodeType": "code128",
-      "width": 2,
-      "height": 85,
+      "width": 6,
+      "height": 201,
+      "ratio": 2,
       "showText": false
     }
   ],

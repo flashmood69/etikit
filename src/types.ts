@@ -85,6 +85,15 @@ export interface LabelTemplate {
   protocol: Protocol;
 }
 
+export interface EditorState {
+  name: string;
+  labelSize: { width: number; height: number };
+  elements: LabelElement[];
+  printSettings: PrintSettings;
+  protocol: Protocol;
+  selectedId: string | null;
+}
+
 export interface LabelDriver {
   protocol: Protocol;
   generate(label: LabelTemplate): string;

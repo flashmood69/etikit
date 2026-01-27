@@ -1,376 +1,109 @@
 import { useState, useRef, useEffect } from 'react'
-import { Plus, Save, FileDown, Type, Barcode as BarcodeIcon, Square, Minus, Trash2, Move, Settings, ChevronDown, ChevronUp, QrCode, Upload } from 'lucide-react'
+import { Plus, Save, FileDown, Type, Barcode as BarcodeIcon, Square, Minus, Trash2, Move, Settings, ChevronDown, ChevronUp, QrCode, Upload, Undo2, Redo2 } from 'lucide-react'
 import Draggable from 'react-draggable'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 import Barcode from 'react-barcode'
 import { QRCodeSVG } from 'qrcode.react'
-import { LabelElement, ElementType, TextElement, BarcodeElement, QRCodeElement, LineElement, RectangleElement, LabelTemplate, DOTS_PER_MM, COORDS_PER_MM, PrintSettings, Protocol, FontMetadata, DEFAULT_DPI } from './types'
-import { drivers, getDriverForFile } from './drivers'
+import { LabelElement, ElementType, TextElement, BarcodeElement, QRCodeElement, LineElement, RectangleElement, LabelTemplate, PrintSettings, Protocol, FontMetadata, DEFAULT_DPI, EditorState } from './types'
+import { drivers } from './drivers'
+import * as LabelService from './services/label-service'
+import { useHistory } from './hooks/useHistory'
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-const FONT_FAMILY_CSS: Record<string, string> = {
-  times: '"Times New Roman", Times, serif',
-  helvetica: 'Helvetica, Arial, sans-serif',
-  courier: '"Courier New", Courier, monospace',
-  presentation: '"Arial Black", Arial, sans-serif',
-  'letter-gothic': '"Courier New", Courier, monospace',
-  'prestige-elite': '"Courier New", Courier, monospace',
-  'ocr-a': '"OCR A Std", "OCR A", monospace',
-  'ocr-b': '"OCR B Std", "OCR B", monospace'
-}
-
-const normalizeTextScale = (val: number) => (val >= 10 ? val / 10 : (val <= 0 ? 1 : val));
-
-const MM_PER_PT = 25.4 / 72;
-const TEXT_FONT_SIZE_SCALE = 1.4;
-const textMetricsCache = new Map<string, { ascent: number; descent: number }>();
-const COMMON_DPI_PRESETS = [203, 300, 600]
-const normalizeDpiToPreset = (dpi: number) => {
-  const value = typeof dpi === 'number' && Number.isFinite(dpi) && dpi > 0 ? Math.round(dpi) : DEFAULT_DPI
-  if (COMMON_DPI_PRESETS.includes(value)) return value
-  let best = COMMON_DPI_PRESETS[0] ?? DEFAULT_DPI
-  let bestDiff = Number.POSITIVE_INFINITY
-  for (const preset of COMMON_DPI_PRESETS) {
-    const diff = Math.abs(preset - value)
-    if (diff < bestDiff) {
-      bestDiff = diff
-      best = preset
-    }
-  }
-  return best
-}
-const getDpi = (printSettings: PrintSettings | undefined) => {
-  const dpi = printSettings?.dpi
-  if (typeof dpi !== 'number' || !Number.isFinite(dpi) || dpi <= 0) return DEFAULT_DPI
-  return dpi
-}
-
-function formatMm(value: number) {
-  if (!Number.isFinite(value)) return String(value)
-  const rounded = Math.round(value * 10) / 10
-  return rounded % 1 === 0 ? String(Math.round(rounded)) : rounded.toFixed(1)
-}
-
-function roundMm(value: number) {
-  if (!Number.isFinite(value)) return value
-  return Math.round(value * 10) / 10
-}
-
-type LabelSizePreset = {
-  id: string
-  widthMm: number
-  heightMm: number
-}
-
-const DEFAULT_LABEL_SIZE_PRESET_ID = '102x76'
-const LABEL_SIZE_PRESETS: LabelSizePreset[] = [
-  { id: '102x76', widthMm: 102, heightMm: 76 },
-  { id: '102x152', widthMm: 102, heightMm: 152 },
-  { id: '100x150', widthMm: 100, heightMm: 150 },
-  { id: '90x50', widthMm: 90, heightMm: 50 },
-  { id: '102x51', widthMm: 102, heightMm: 51 },
-  { id: '76x51', widthMm: 76, heightMm: 51 },
-  { id: '70x50', widthMm: 70, heightMm: 50 },
-  { id: '58x40', widthMm: 58, heightMm: 40 },
-  { id: '50x25', widthMm: 50, heightMm: 25 },
-  { id: '38x25', widthMm: 38, heightMm: 25 },
-]
-
-function getFileBaseName(filename: string) {
-  const trimmed = (filename || '').trim()
-  if (trimmed.length === 0) return 'Untitled'
-  const lastDot = trimmed.lastIndexOf('.')
-  if (lastDot <= 0) return trimmed
-  return trimmed.slice(0, lastDot)
-}
-
-function formatInches(valueMm: number) {
-  if (!Number.isFinite(valueMm)) return String(valueMm)
-  const inches = valueMm / 25.4
-  const rounded = Math.round(inches * 10) / 10
-  return rounded % 1 === 0 ? String(Math.round(rounded)) : rounded.toFixed(1)
-}
-
-function formatLabelSizePreset(preset: LabelSizePreset) {
-  return `${formatMm(preset.widthMm)} × ${formatMm(preset.heightMm)} mm (${formatInches(preset.widthMm)}" × ${formatInches(preset.heightMm)}")`
-}
-
-function resolveFontMeta(textEl: TextElement, supportedFonts: FontMetadata[]) {
-  return supportedFonts.find((p) => p.key === textEl.fontCode) ?? supportedFonts[0];
-}
-
-function getTextScales(textEl: TextElement, protocol: Protocol) {
-  if (protocol === 'zpl') {
-    const widthDots = typeof textEl.width === 'number' && Number.isFinite(textEl.width) ? textEl.width : 0;
-    const heightDots = typeof textEl.height === 'number' && Number.isFinite(textEl.height) ? textEl.height : 0;
-    const scaleX = widthDots > 0 && heightDots > 0 ? (widthDots / heightDots) : 1;
-    return { scaleX, scaleY: 1 };
-  }
-  const scaleX = normalizeTextScale(textEl.width || 10);
-  const scaleY = normalizeTextScale(textEl.height || 10);
-  return { scaleX, scaleY };
-}
-
-function getTextFontStyle(
-  textEl: TextElement,
-  zoom: number,
-  supportedFonts: FontMetadata[],
-  protocol: Protocol,
-  printSettings: PrintSettings
-) {
-  const fontMeta = resolveFontMeta(textEl, supportedFonts);
-  const fontFamilyKey = fontMeta?.fontFamily ?? 'helvetica';
-  const fontFamily = FONT_FAMILY_CSS[fontFamilyKey] || FONT_FAMILY_CSS.helvetica;
-  const fontWeight = fontMeta?.fontWeight ?? 'normal';
-  const fontStyle = fontMeta?.fontStyle ?? 'normal';
-  const fontSizePx = (() => {
-    if (protocol !== 'zpl') return (fontMeta?.fontSizePt ?? 10) * MM_PER_PT * zoom * TEXT_FONT_SIZE_SCALE;
-    const targetDotsPerMm = getDpi(printSettings) / 25.4;
-    const heightDots =
-      typeof textEl.height === 'number' && Number.isFinite(textEl.height) && textEl.height > 0
-        ? textEl.height
-        : Math.max(1, Math.round(((fontMeta?.fontSizePt ?? 10) * MM_PER_PT) * TEXT_FONT_SIZE_SCALE * targetDotsPerMm));
-    return (heightDots / targetDotsPerMm) * zoom;
-  })();
-  return { fontSizePx, fontWeight, fontStyle, fontFamily };
-}
-
-function getFontMetricsPx(font: { fontSizePx: number; fontWeight: number | string; fontStyle: string; fontFamily: string }) {
-  const key = `${font.fontStyle}|${font.fontWeight}|${font.fontSizePx}|${font.fontFamily}`;
-  const cached = textMetricsCache.get(key);
-  if (cached) return cached;
-
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  if (!ctx) {
-    const fallback = { ascent: font.fontSizePx * 0.8, descent: font.fontSizePx * 0.2 };
-    textMetricsCache.set(key, fallback);
-    return fallback;
-  }
-
-  ctx.font = `${font.fontStyle} ${font.fontWeight} ${font.fontSizePx}px ${font.fontFamily}`;
-  const metrics = ctx.measureText('Mg');
-  const ascent = metrics.actualBoundingBoxAscent ?? font.fontSizePx * 0.8;
-  const descent = metrics.actualBoundingBoxDescent ?? font.fontSizePx * 0.2;
-  const result = { ascent, descent };
-  textMetricsCache.set(key, result);
-  return result;
-}
-
-function getLineBoundingBoxPx(lineEl: LineElement, zoom: number, protocol: Protocol, printSettings: PrintSettings) {
-  const dotsPerMm = getDpi(printSettings) / 25.4
-  const dx = protocol === 'zpl'
-    ? ((lineEl.x2 - lineEl.x) / dotsPerMm) * zoom
-    : ((lineEl.x2 - lineEl.x) / COORDS_PER_MM) * zoom
-  const dy = protocol === 'zpl'
-    ? ((lineEl.y2 - lineEl.y) / dotsPerMm) * zoom
-    : ((lineEl.y2 - lineEl.y) / COORDS_PER_MM) * zoom
-  const thicknessPx = Math.max(
-    0.5,
-    protocol === 'zpl'
-      ? (Math.max(1, lineEl.thickness) / dotsPerMm) * zoom
-      : (lineEl.thickness / DOTS_PER_MM) * zoom
-  )
-  const minX = Math.min(0, dx);
-  const minY = Math.min(0, dy);
-  const maxX = Math.max(0, dx);
-  const maxY = Math.max(0, dy);
-  const width = (maxX - minX) + thicknessPx;
-  const height = (maxY - minY) + thicknessPx;
-  return { dx, dy, thicknessPx, minX, minY, width, height };
-}
-
-function getElementSize(element: LabelElement, zoom: number, supportedFonts: FontMetadata[], protocol: Protocol, printSettings: PrintSettings) {
-  const dotsPerMm = getDpi(printSettings) / 25.4
-  const baseDotsToPx = (baseDots: number) => (baseDots / DOTS_PER_MM) * zoom
-  const coordsToPx = (coords: number) => (coords / COORDS_PER_MM) * zoom
-  const zplDotsToPx = (dots: number) => (dots / dotsPerMm) * zoom
-  
-  if (element.type === 'text') {
-    const textEl = element as TextElement;
-    const font = getTextFontStyle(textEl, zoom, supportedFonts, protocol, printSettings);
-    const { scaleX, scaleY } = getTextScales(textEl, protocol);
-    
-    const lines = ((element.content && element.content.length > 0) ? element.content : '\u00A0').split('\n');
-    let maxLineWidth = 0;
-    
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    if (ctx) {
-      ctx.font = `${font.fontStyle} ${font.fontWeight} ${font.fontSizePx}px ${font.fontFamily}`;
-      for (const line of lines) {
-        maxLineWidth = Math.max(maxLineWidth, ctx.measureText(line).width);
-      }
-    } else {
-      maxLineWidth = Math.max(...lines.map((l) => l.length)) * (font.fontSizePx * 0.6);
-    }
-
-    const { ascent, descent } = getFontMetricsPx(font);
-    const lineHeightPx = ascent + descent;
-    return { width: maxLineWidth * scaleX, height: lines.length * lineHeightPx * scaleY };
-  }
-  if (element.type === 'barcode') {
-    const targetModuleWidthPx = protocol === 'zpl' ? zplDotsToPx(element.width) : baseDotsToPx(element.width)
-    const barHeightPx = Math.max(1, protocol === 'zpl' ? zplDotsToPx(element.height) : coordsToPx(element.height))
-    const modules = (element.content?.length ?? 0) * 11 + 35;
-    return { width: modules * targetModuleWidthPx, height: barHeightPx };
-  }
-  if (element.type === 'qrcode') {
-    const qrEl = element as QRCodeElement;
-    const moduleSizePx = protocol === 'zpl' ? zplDotsToPx(qrEl.size) : baseDotsToPx(qrEl.size)
-    const modules = 21;
-    const sizePx = modules * moduleSizePx;
-    return { width: sizePx, height: sizePx };
-  }
-  if (element.type === 'line') {
-    const { width, height } = getLineBoundingBoxPx(element as LineElement, zoom, protocol, printSettings);
-    return { width, height };
-  }
-  if (element.type === 'rectangle') {
-    if (protocol === 'zpl') {
-      return {
-        width: zplDotsToPx(element.width),
-        height: zplDotsToPx(element.height)
-      }
-    }
-    return { 
-      width: coordsToPx(element.width), 
-      height: coordsToPx(element.height) 
-    };
-  }
-  return { width: 1, height: 1 };
-}
-
 function App() {
-  const [elements, setElements] = useState<LabelElement[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [labelSize, setLabelSize] = useState({ width: 102, height: 76 });
-  const [labelName, setLabelName] = useState('Untitled');
-  const [protocol, setProtocol] = useState<Protocol>('tpcl');
+  const { state, pushState, undo, redo, canUndo, canRedo, resetState, replaceState } = useHistory({
+    elements: [],
+    selectedId: null,
+    labelSize: { width: 102, height: 76 },
+    name: 'Untitled',
+    protocol: 'tpcl',
+    printSettings: LabelService.createDefaultPrintSettings(),
+  });
+
+  const { elements, selectedId, labelSize, name: labelName, protocol, printSettings } = state;
+
   const [zoom, setZoom] = useState(4); // 1mm = 4px
   const [isAutoZoom, setIsAutoZoom] = useState(false);
-  const [printSettings, setPrintSettings] = useState<PrintSettings>({
-    quantity: 1,
-    speed: 3,
-    darkness: 10,
-    dpi: DEFAULT_DPI
-  });
   const [isNewConfirmOpen, setIsNewConfirmOpen] = useState(false);
-  const [newLabelPresetId, setNewLabelPresetId] = useState(DEFAULT_LABEL_SIZE_PRESET_ID);
+  const [newLabelPresetId, setNewLabelPresetId] = useState(LabelService.DEFAULT_LABEL_SIZE_PRESET_ID);
   const [newProtocol, setNewProtocol] = useState<Protocol>('tpcl');
   const [newDpi, setNewDpi] = useState<number>(DEFAULT_DPI);
   const editorViewportRef = useRef<HTMLDivElement | null>(null);
+
+  // Helper setters that push to history
+  const setElements = (newElements: LabelElement[] | ((prev: LabelElement[]) => LabelElement[])) => {
+    const nextElements = typeof newElements === 'function' ? newElements(elements) : newElements;
+    pushState({ ...state, elements: nextElements });
+  };
+
+  const setSelectedId = (id: string | null) => {
+    // Selection changes should not typically create a new history entry
+    replaceState({ ...state, selectedId: id });
+  };
+
+  const setLabelSize = (size: { width: number; height: number }) => {
+    pushState({ ...state, labelSize: size });
+  };
+
+  const setLabelName = (name: string) => {
+    pushState({ ...state, name });
+  };
+
+  const setProtocol = (p: Protocol) => {
+    pushState({ ...state, protocol: p });
+  };
+
+  const setPrintSettings = (settings: PrintSettings) => {
+    pushState({ ...state, printSettings: settings });
+  };
   
   const selectedElement = elements.find(el => el.id === selectedId);
   const currentDriver = drivers[protocol];
 
-  const getFontPresetKey = (textEl: TextElement) => {
-    return textEl.fontCode || currentDriver.supportedFonts[0]?.key;
-  };
-
-  const applyFontPreset = (id: string, presetKey: string) => {
-    updateElement(id, {
-      fontCode: presetKey,
-    } as any);
-  };
-
   const addElement = (type: ElementType) => {
-    const id = Math.random().toString(36).substr(2, 9);
-    let newElement: LabelElement;
-
-    const base = {
-      id,
-      type,
-      x: 100, // 10mm
-      y: 100, // 10mm
-      rotation: 0,
-    };
-
-    switch (type) {
-      case 'text':
-        {
-          const defaultFont = currentDriver.supportedFonts[0];
-          const defaultTextSize = (() => {
-            if (protocol !== 'zpl') return { width: 10, height: 10 };
-            const targetDotsPerMm = getDpi(printSettings) / 25.4;
-            const heightDots = Math.max(
-              1,
-              Math.round((((defaultFont?.fontSizePt ?? 10) * MM_PER_PT) * TEXT_FONT_SIZE_SCALE) * targetDotsPerMm)
-            );
-            return { width: heightDots, height: heightDots };
-          })();
-          newElement = { 
-            ...base, 
-            type: 'text', 
-            content: 'New Text', 
-            fontCode: defaultFont?.key ?? '0',
-            width: defaultTextSize.width,
-            height: defaultTextSize.height
-          } as TextElement;
-        }
-        break;
-      case 'barcode':
-        {
-          const defaultBarcode = currentDriver.supportedBarcodes[0];
-          newElement = { 
-            ...base, 
-            type: 'barcode', 
-            content: '12345678', 
-            barcodeType: defaultBarcode?.type ?? 'code128', 
-            height: 100, 
-            width: 3 
-          } as BarcodeElement;
-        }
-        break;
-      case 'qrcode':
-        newElement = { ...base, type: 'qrcode', content: '12345678', size: 5 } as QRCodeElement;
-        break;
-      case 'line':
-        newElement = { ...base, type: 'line', x2: 200, y2: 100, thickness: 3 } as LineElement;
-        break;
-      case 'rectangle':
-        newElement = { ...base, type: 'rectangle', width: 200, height: 100, thickness: 3 } as RectangleElement;
-        break;
-      default:
-        return;
+    try {
+      const newElement = LabelService.createDefaultElement(
+        type, 
+        protocol, 
+        printSettings, 
+        currentDriver.supportedFonts, 
+        currentDriver.supportedBarcodes
+      );
+      pushState({
+        ...state,
+        elements: [...elements, newElement],
+        selectedId: newElement.id
+      });
+    } catch (err) {
+      console.error(err);
     }
-
-    setElements([...elements, newElement]);
-    setSelectedId(id);
   };
 
   const updateElement = (id: string, updates: Partial<LabelElement>) => {
-    setElements(elements.map(el => {
+    const nextElements = elements.map(el => {
       if (el.id !== id) return el;
-      
-      const newEl = { ...el, ...updates } as LabelElement;
-      
-      // If we are moving a line (changing x or y), adjust x2/y2 to maintain length/angle
-      if (el.type === 'line' && (updates.x !== undefined || updates.y !== undefined)) {
-        const line = el as LineElement;
-        const dx = updates.x !== undefined ? updates.x - line.x : 0;
-        const dy = updates.y !== undefined ? updates.y - line.y : 0;
-        (newEl as LineElement).x2 = line.x2 + dx;
-        (newEl as LineElement).y2 = line.y2 + dy;
-      }
-      
-      return newEl;
-    }));
+      return LabelService.applyElementUpdates(el, updates);
+    });
+    pushState({ ...state, elements: nextElements });
   };
 
   const deleteElement = (id: string) => {
-    setElements(elements.filter(el => el.id !== id));
-    if (selectedId === id) setSelectedId(null);
+    const nextElements = elements.filter(el => el.id !== id);
+    const nextSelectedId = selectedId === id ? null : selectedId;
+    pushState({
+      ...state,
+      elements: nextElements,
+      selectedId: nextSelectedId
+    });
   };
 
   const handleDrag = (id: string, data: { x: number, y: number }) => {
-    const unitsPerMm = protocol === 'zpl' ? (getDpi(printSettings) / 25.4) : COORDS_PER_MM
-    const x = Math.round((data.x / zoom) * unitsPerMm)
-    const y = Math.round((data.y / zoom) * unitsPerMm)
+    const x = LabelService.pxToUnits(data.x, zoom, protocol, printSettings)
+    const y = LabelService.pxToUnits(data.y, zoom, protocol, printSettings)
     updateElement(id, { x, y });
   };
 
@@ -413,35 +146,7 @@ function App() {
       printSettings,
       protocol
     };
-    
-    const driver = drivers[protocol];
-    if (!driver) {
-      alert(`Driver for ${protocol} not found`);
-      return;
-    }
-
-    const output = driver.generate(template);
-    
-    // Convert string to bytes. TPCL might need Windows-1252, ZPL might need UTF-8.
-    // For now, we'll use a basic mapping or TextEncoder.
-    let bytes: Uint8Array;
-    if (protocol === 'tpcl') {
-      bytes = new Uint8Array(output.length);
-      for (let i = 0; i < output.length; i++) {
-        const charCode = output.charCodeAt(i);
-        bytes[i] = charCode <= 255 ? charCode : 63;
-      }
-    } else {
-      bytes = new TextEncoder().encode(output);
-    }
-    
-    const blob = new Blob([bytes as any], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${labelName}${driver.supportedExtensions[0]}`;
-    a.click();
-    URL.revokeObjectURL(url);
+    LabelService.exportLabel(template);
   };
 
   const saveTemplate = () => {
@@ -453,141 +158,84 @@ function App() {
       printSettings,
       protocol
     };
-    const json = JSON.stringify(template, null, 2);
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${labelName}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    LabelService.saveTemplate(template);
   };
 
-  const loadTemplate = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const loadTemplate = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const buffer = event.target?.result as ArrayBuffer;
-        let content = '';
-        let template: LabelTemplate | null = null;
-
-        // Try JSON first
-        try {
-          const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
-          content = utf8Decoder.decode(buffer);
-          try {
-            const parsed = JSON.parse(content);
-            if (parsed.elements && Array.isArray(parsed.elements)) {
-              template = parsed as LabelTemplate;
-            }
-          } catch (e) {
-            // Not JSON
-          }
-        } catch (e) {
-          // Not UTF-8
-        }
-
-        // If not JSON, try drivers
-        if (!template) {
-          const driver = getDriverForFile(file.name);
-          if (driver) {
-            // Try different encodings for drivers
-            try {
-              const win1252Decoder = new TextDecoder('windows-1252');
-              content = win1252Decoder.decode(buffer);
-              template = driver.parse(content);
-            } catch (err) {
-              const utf8Decoder = new TextDecoder('utf-8');
-              content = utf8Decoder.decode(buffer);
-              template = driver.parse(content);
-            }
-          }
-        }
-
-        if (template && template.elements && Array.isArray(template.elements)) {
-          const rawPs = (template as any).printSettings as any
-          const migratedPs: PrintSettings = (() => {
-            const dpiFromLegacy =
-              template.protocol === 'zpl' &&
-              rawPs &&
-              typeof rawPs.zplDotsPerMm === 'number' &&
-              Number.isFinite(rawPs.zplDotsPerMm) &&
-              rawPs.zplDotsPerMm > 0
-                ? Math.round(rawPs.zplDotsPerMm * 25.4)
-                : undefined
-            const dpi =
-              typeof rawPs?.dpi === 'number' && Number.isFinite(rawPs.dpi) && rawPs.dpi > 0 ? rawPs.dpi : (dpiFromLegacy ?? DEFAULT_DPI)
-            const quantity =
-              typeof rawPs?.quantity === 'number' && Number.isFinite(rawPs.quantity) && rawPs.quantity > 0 ? rawPs.quantity : 1
-            const speed = typeof rawPs?.speed === 'number' && Number.isFinite(rawPs.speed) ? rawPs.speed : 3
-            const darkness = typeof rawPs?.darkness === 'number' && Number.isFinite(rawPs.darkness) ? rawPs.darkness : 10
-            return { quantity, speed, darkness, dpi: normalizeDpiToPreset(dpi) }
-          })()
-          setElements(template.elements);
-          setLabelSize({ width: roundMm(template.width), height: roundMm(template.height) });
-          setLabelName(getFileBaseName(file.name));
-          setPrintSettings(migratedPs);
-          if (template.protocol) {
-            setProtocol(template.protocol);
-          } else {
-            const lower = file.name.toLowerCase()
-            if (lower.endsWith('.ezpl')) setProtocol('zpl')
-            if (lower.endsWith('.etec')) setProtocol('tpcl')
-          }
-          setSelectedId(null);
-        } else {
-          alert('Could not parse file');
-        }
-      } catch (err) {
-        console.error('Failed to parse template:', err);
-        alert('Invalid template file');
+    try {
+      const result = await LabelService.loadTemplate(file);
+      if (result) {
+        resetState({
+          elements: result.elements,
+          labelSize: { width: result.width, height: result.height },
+          name: result.labelName,
+          printSettings: result.printSettings,
+          protocol: result.protocol,
+          selectedId: null,
+        });
+      } else {
+        alert('Could not parse file');
       }
-    };
-    reader.readAsArrayBuffer(file);
-    // Reset input
-    e.target.value = '';
+    } catch (err) {
+      console.error('Failed to parse template:', err);
+      alert('Invalid template file');
+    } finally {
+      e.target.value = '';
+    }
   };
 
   const resetToNew = (size?: { width: number; height: number }, newProtocol?: Protocol, dpi?: number) => {
     const nextSize = size ?? { width: 102, height: 76 }
-    setElements([]);
-    setSelectedId(null);
-    setLabelName('Untitled');
-    setLabelSize(nextSize);
-    if (newProtocol) setProtocol(newProtocol);
-    const nextDpi = typeof dpi === 'number' && Number.isFinite(dpi) && dpi > 0 ? dpi : DEFAULT_DPI
-    setPrintSettings({ quantity: 1, speed: 3, darkness: 10, dpi: nextDpi });
+    resetState({
+      elements: [],
+      selectedId: null,
+      name: 'Untitled',
+      labelSize: nextSize,
+      protocol: newProtocol ?? protocol,
+      printSettings: LabelService.createDefaultPrintSettings(dpi),
+    });
   };
 
   const setDpiPreservingZplTextSizes = (nextDpiRaw: number) => {
-    const nextDpi = normalizeDpiToPreset(nextDpiRaw)
-    const prevDpi = getDpi(printSettings)
+    const nextDpi = LabelService.normalizeDpiToPreset(nextDpiRaw)
+    const prevDpi = LabelService.getDpi(printSettings)
 
-    setPrintSettings({ ...printSettings, dpi: nextDpi })
+    const nextPrintSettings = { ...printSettings, dpi: nextDpi };
+    let nextElements = elements;
 
-    if (protocol !== 'zpl') return
-    if (!Number.isFinite(prevDpi) || prevDpi <= 0) return
-    if (!Number.isFinite(nextDpi) || nextDpi <= 0) return
-    if (Math.abs(nextDpi - prevDpi) < 0.001) return
+    if (protocol === 'zpl') {
+      nextElements = LabelService.rescaleElementsForDpi(elements, prevDpi, nextDpi);
+    }
 
-    const ratio = nextDpi / prevDpi
-    setElements((prev) =>
-      prev.map((el) => {
-        if (el.type !== 'text') return el
-        const textEl = el as TextElement
-        const w = typeof textEl.width === 'number' && Number.isFinite(textEl.width) ? textEl.width : 0
-        const h = typeof textEl.height === 'number' && Number.isFinite(textEl.height) ? textEl.height : 0
-        return {
-          ...textEl,
-          width: Math.max(1, Math.round(w * ratio)),
-          height: Math.max(1, Math.round(h * ratio))
-        }
-      })
-    )
+    pushState({
+      ...state,
+      printSettings: nextPrintSettings,
+      elements: nextElements
+    });
   }
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === 'z') {
+          if (e.shiftKey) {
+            redo();
+          } else {
+            undo();
+          }
+        } else if (e.key === 'y') {
+          redo();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [undo, redo]);
 
   return (
     <div className="flex h-screen w-full flex-col bg-slate-50 text-slate-900 overflow-hidden font-sans">
@@ -609,9 +257,9 @@ function App() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => {
-              setNewLabelPresetId(DEFAULT_LABEL_SIZE_PRESET_ID);
+              setNewLabelPresetId(LabelService.DEFAULT_LABEL_SIZE_PRESET_ID);
               setNewProtocol(protocol);
-              setNewDpi(normalizeDpiToPreset(getDpi(printSettings)));
+              setNewDpi(LabelService.normalizeDpiToPreset(LabelService.getDpi(printSettings)));
               setIsNewConfirmOpen(true);
             }}
             className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50 transition-colors"
@@ -628,6 +276,28 @@ function App() {
             <Save size={16} />
             Save
           </button>
+          
+          <div className="h-6 w-[1px] bg-slate-200 mx-1" />
+          
+          <div className="flex items-center gap-1">
+            <button
+              onClick={undo}
+              disabled={!canUndo}
+              title="Undo (Ctrl+Z)"
+              className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+            >
+              <Undo2 size={18} />
+            </button>
+            <button
+              onClick={redo}
+              disabled={!canRedo}
+              title="Redo (Ctrl+Y)"
+              className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+            >
+              <Redo2 size={18} />
+            </button>
+          </div>
+
           <div className="flex items-center gap-2 ml-2">
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-100 border border-slate-200">
               <span className="text-[10px] font-bold text-slate-400 uppercase">Protocol</span>
@@ -674,10 +344,10 @@ function App() {
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">DPI</label>
                 <select
                   className="mt-2 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                  value={String(normalizeDpiToPreset(newDpi))}
-                  onChange={(e) => setNewDpi(normalizeDpiToPreset(parseInt(e.target.value, 10)))}
+                  value={String(LabelService.normalizeDpiToPreset(newDpi))}
+                  onChange={(e) => setNewDpi(LabelService.normalizeDpiToPreset(parseInt(e.target.value, 10)))}
                 >
-                  {COMMON_DPI_PRESETS.map((dpi) => (
+                  {LabelService.COMMON_DPI_PRESETS.map((dpi) => (
                     <option key={dpi} value={dpi}>{dpi}</option>
                   ))}
                 </select>
@@ -689,9 +359,9 @@ function App() {
                   value={newLabelPresetId}
                   onChange={(e) => setNewLabelPresetId(e.target.value)}
                 >
-                  {LABEL_SIZE_PRESETS.map((preset) => (
+                  {LabelService.LABEL_SIZE_PRESETS.map((preset) => (
                     <option key={preset.id} value={preset.id}>
-                      {formatLabelSizePreset(preset)}
+                      {LabelService.formatLabelSizePreset(preset)}
                     </option>
                   ))}
                 </select>
@@ -707,9 +377,9 @@ function App() {
               <button
                 onClick={() => {
                   const preset =
-                    LABEL_SIZE_PRESETS.find((p) => p.id === newLabelPresetId) ??
-                    LABEL_SIZE_PRESETS.find((p) => p.id === DEFAULT_LABEL_SIZE_PRESET_ID) ??
-                    LABEL_SIZE_PRESETS[0];
+                    LabelService.LABEL_SIZE_PRESETS.find((p) => p.id === newLabelPresetId) ??
+                    LabelService.LABEL_SIZE_PRESETS.find((p) => p.id === LabelService.DEFAULT_LABEL_SIZE_PRESET_ID) ??
+                    LabelService.LABEL_SIZE_PRESETS[0];
                   resetToNew({ width: preset.widthMm, height: preset.heightMm }, newProtocol, newDpi);
                   setIsNewConfirmOpen(false);
                 }}
@@ -763,7 +433,7 @@ function App() {
             </div>
             <div className="w-px h-4 bg-slate-200" />
             <div className="text-[10px] font-bold text-slate-400 uppercase">
-              {formatMm(labelSize.width)} x {formatMm(labelSize.height)} mm
+              {LabelService.formatMm(labelSize.width)} x {LabelService.formatMm(labelSize.height)} mm
             </div>
           </div>
 
@@ -830,18 +500,45 @@ function App() {
                   </button>
                 </header>
 
+                {/* Primary Content Field (First) */}
+                {selectedElement.type === 'text' && (
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase">Content</label>
+                    <textarea 
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 min-h-[80px]"
+                      value={(selectedElement as TextElement).content}
+                      onChange={(e) => updateElement(selectedElement.id, { content: e.target.value })}
+                    />
+                  </div>
+                )}
+
+                {(selectedElement.type === 'barcode' || selectedElement.type === 'qrcode') && (
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase">
+                      {selectedElement.type === 'barcode' ? 'Data' : 'Data'}
+                    </label>
+                    <input 
+                      type="text"
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                      value={(selectedElement as BarcodeElement | QRCodeElement).content}
+                      onChange={(e) => updateElement(selectedElement.id, { content: e.target.value })}
+                    />
+                  </div>
+                )}
+
+                {/* Position & Rotation */}
                 <PropertyGrid>
                   <PropertyInput 
                     label="X (mm)" 
-                    value={(selectedElement.x / COORDS_PER_MM).toFixed(1)} 
-                    onChange={(val) => updateElement(selectedElement.id, { x: parseFloat(val) * COORDS_PER_MM })}
+                    value={LabelService.unitsToMm(selectedElement.x, protocol, printSettings).toFixed(1)} 
+                    onChange={(val) => updateElement(selectedElement.id, { x: LabelService.mmToUnits(parseFloat(val), protocol, printSettings) })}
                     type="number"
                     step={0.1}
                   />
                   <PropertyInput 
                     label="Y (mm)" 
-                    value={(selectedElement.y / COORDS_PER_MM).toFixed(1)} 
-                    onChange={(val) => updateElement(selectedElement.id, { y: parseFloat(val) * COORDS_PER_MM })}
+                    value={LabelService.unitsToMm(selectedElement.y, protocol, printSettings).toFixed(1)} 
+                    onChange={(val) => updateElement(selectedElement.id, { y: LabelService.mmToUnits(parseFloat(val), protocol, printSettings) })}
                     type="number"
                     step={0.1}
                   />
@@ -860,22 +557,15 @@ function App() {
                   </div>
                 </PropertyGrid>
 
+                {/* Secondary Properties */}
                 {selectedElement.type === 'text' && (
                   <>
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase">Content</label>
-                      <textarea 
-                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 min-h-[80px]"
-                        value={selectedElement.content}
-                        onChange={(e) => updateElement(selectedElement.id, { content: e.target.value })}
-                      />
-                    </div>
-                    <div className="space-y-2">
+                    <div className="space-y-1.5">
                       <label className="text-[10px] font-bold text-slate-400 uppercase">Font</label>
                       <select 
-                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
-                        value={getFontPresetKey(selectedElement as TextElement)}
-                        onChange={(e) => applyFontPreset(selectedElement.id, e.target.value)}
+                        className="w-full rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
+                        value={LabelService.getFontPresetKey(selectedElement as TextElement, currentDriver.supportedFonts)}
+                        onChange={(e) => updateElement(selectedElement.id, { fontCode: e.target.value } as any)}
                       >
                         {currentDriver.supportedFonts.map(p => (
                           <option key={p.key} value={p.key}>{p.label}</option>
@@ -885,14 +575,14 @@ function App() {
                     <PropertyGrid>
                       <PropertyInput 
                         label={protocol === 'zpl' ? 'Font Width (dots)' : 'Width Scale'} 
-                        value={selectedElement.width} 
+                        value={(selectedElement as TextElement).width} 
                         onChange={(val) => updateElement(selectedElement.id, { width: parseFloat(val) })}
                         type="number"
                         step={protocol === 'zpl' ? 1 : 0.1}
                       />
                       <PropertyInput 
                         label={protocol === 'zpl' ? 'Font Height (dots)' : 'Height Scale'} 
-                        value={selectedElement.height} 
+                        value={(selectedElement as TextElement).height} 
                         onChange={(val) => updateElement(selectedElement.id, { height: parseFloat(val) })}
                         type="number"
                         step={protocol === 'zpl' ? 1 : 0.1}
@@ -904,19 +594,10 @@ function App() {
                 {selectedElement.type === 'barcode' && (
                   <>
                     <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase">Data</label>
-                      <input 
-                        type="text"
-                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                        value={selectedElement.content}
-                        onChange={(e) => updateElement(selectedElement.id, { content: e.target.value })}
-                      />
-                    </div>
-                    <div className="space-y-2">
                       <label className="text-[10px] font-bold text-slate-400 uppercase">Type</label>
                       <select 
                         className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
-                        value={selectedElement.barcodeType}
+                        value={(selectedElement as BarcodeElement).barcodeType}
                         onChange={(e) => updateElement(selectedElement.id, { barcodeType: e.target.value })}
                       >
                         {currentDriver.supportedBarcodes.map(b => (
@@ -927,14 +608,14 @@ function App() {
                     <PropertyGrid>
                       <PropertyInput 
                         label="Height" 
-                        value={selectedElement.height} 
+                        value={(selectedElement as BarcodeElement).height} 
                         onChange={(val) => updateElement(selectedElement.id, { height: parseInt(val) })}
                         type="number"
                         step={1}
                       />
                       <PropertyInput 
                         label="Narrow Bar" 
-                        value={selectedElement.width} 
+                        value={(selectedElement as BarcodeElement).width} 
                         onChange={(val) => updateElement(selectedElement.id, { width: parseInt(val) })}
                         type="number"
                         step={1}
@@ -944,40 +625,29 @@ function App() {
                 )}
 
                 {selectedElement.type === 'qrcode' && (
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase">Data</label>
-                      <input 
-                        type="text"
-                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                        value={selectedElement.content}
-                        onChange={(e) => updateElement(selectedElement.id, { content: e.target.value })}
-                      />
-                    </div>
-                    <PropertyInput 
-                      label="Size" 
-                      value={selectedElement.size} 
-                      onChange={(val) => updateElement(selectedElement.id, { size: parseInt(val) })}
-                      type="number"
-                      step={1}
-                    />
-                  </div>
+                  <PropertyInput 
+                    label="Size" 
+                    value={(selectedElement as QRCodeElement).size} 
+                    onChange={(val) => updateElement(selectedElement.id, { size: parseInt(val) })}
+                    type="number"
+                    step={1}
+                  />
                 )}
 
                 {selectedElement.type === 'line' && (
                   <div className="space-y-4">
                     <PropertyGrid>
                       <PropertyInput 
-                        label="End X (mm)" 
-                        value={(selectedElement.x2 / COORDS_PER_MM).toFixed(1)} 
-                        onChange={(val) => updateElement(selectedElement.id, { x2: parseFloat(val) * COORDS_PER_MM })}
+                        label="X2 (mm)" 
+                        value={LabelService.unitsToMm((selectedElement as LineElement).x2, protocol, printSettings).toFixed(1)} 
+                        onChange={(val) => updateElement(selectedElement.id, { x2: LabelService.mmToUnits(parseFloat(val), protocol, printSettings) })}
                         type="number"
                         step={0.1}
                       />
                       <PropertyInput 
-                        label="End Y (mm)" 
-                        value={(selectedElement.y2 / COORDS_PER_MM).toFixed(1)} 
-                        onChange={(val) => updateElement(selectedElement.id, { y2: parseFloat(val) * COORDS_PER_MM })}
+                        label="Y2 (mm)" 
+                        value={LabelService.unitsToMm((selectedElement as LineElement).y2, protocol, printSettings).toFixed(1)} 
+                        onChange={(val) => updateElement(selectedElement.id, { y2: LabelService.mmToUnits(parseFloat(val), protocol, printSettings) })}
                         type="number"
                         step={0.1}
                       />
@@ -996,15 +666,15 @@ function App() {
                   <PropertyGrid>
                     <PropertyInput 
                       label="Width (mm)" 
-                      value={(selectedElement.width / COORDS_PER_MM).toFixed(1)} 
-                      onChange={(val) => updateElement(selectedElement.id, { width: parseFloat(val) * COORDS_PER_MM })}
+                      value={LabelService.unitsToMm((selectedElement as RectangleElement).width, protocol, printSettings).toFixed(1)} 
+                      onChange={(val) => updateElement(selectedElement.id, { width: LabelService.mmToUnits(parseFloat(val), protocol, printSettings) })}
                       type="number"
                       step={0.1}
                     />
                     <PropertyInput 
                       label="Height (mm)" 
-                      value={(selectedElement.height / COORDS_PER_MM).toFixed(1)} 
-                      onChange={(val) => updateElement(selectedElement.id, { height: parseFloat(val) * COORDS_PER_MM })}
+                      value={LabelService.unitsToMm((selectedElement as RectangleElement).height, protocol, printSettings).toFixed(1)} 
+                      onChange={(val) => updateElement(selectedElement.id, { height: LabelService.mmToUnits(parseFloat(val), protocol, printSettings) })}
                       type="number"
                       step={0.1}
                     />
@@ -1034,14 +704,14 @@ function App() {
             <PropertyGrid>
               <PropertyInput 
                 label="Width (mm)" 
-                value={formatMm(labelSize.width)} 
+                value={LabelService.formatMm(labelSize.width)} 
                 onChange={(val) => setLabelSize({ ...labelSize, width: parseFloat(val) })}
                 type="number"
                 step={0.1}
               />
               <PropertyInput 
                 label="Height (mm)" 
-                value={formatMm(labelSize.height)} 
+                value={LabelService.formatMm(labelSize.height)} 
                 onChange={(val) => setLabelSize({ ...labelSize, height: parseFloat(val) })}
                 type="number"
                 step={0.1}
@@ -1061,10 +731,10 @@ function App() {
                 <label className="text-[10px] font-bold text-slate-400 uppercase">DPI</label>
                 <select
                   className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                  value={String(normalizeDpiToPreset(printSettings.dpi ?? DEFAULT_DPI))}
+                  value={String(LabelService.normalizeDpiToPreset(printSettings.dpi ?? DEFAULT_DPI))}
                   onChange={(e) => setDpiPreservingZplTextSizes(parseInt(e.target.value, 10))}
                 >
-                  {COMMON_DPI_PRESETS.map((dpi) => (
+                  {LabelService.COMMON_DPI_PRESETS.map((dpi) => (
                     <option key={dpi} value={dpi}>{dpi}</option>
                   ))}
                 </select>
@@ -1221,34 +891,14 @@ function DraggableElement({ element, zoom, protocol, printSettings, supportedFon
 }) {
   const nodeRef = useRef<HTMLDivElement | null>(null);
   
-  const rotation = ((element.rotation || 0) % 4 + 4) % 4;
-  const size = getElementSize(element, zoom, supportedFonts, protocol, printSettings);
-  const rawWidth = size.width;
-  const rawHeight = size.height;
+  const {
+    translateX,
+    translateY,
+    baselineOffsetPx
+  } = LabelService.getElementVisualMetadata(element, zoom, supportedFonts, protocol, printSettings);
 
-  // Calculate bounding box for rotated element
-  const rotationRad = (rotation * 90 * Math.PI) / 180;
-  const cos = Math.abs(Math.cos(rotationRad));
-  const sin = Math.abs(Math.sin(rotationRad));
-  const rotatedWidth = rawWidth * cos + rawHeight * sin;
-  const rotatedHeight = rawWidth * sin + rawHeight * cos;
-
-  // Calculate translation needed to keep content in a positive bounding box if rotated around top-left
-  const translateX = (rotation === 1) ? rawHeight : (rotation === 2 ? rawWidth : (rotation === 3 ? 0 : 0));
-  const translateY = (rotation === 1) ? 0 : (rotation === 2 ? rawHeight : (rotation === 3 ? rawWidth : 0));
-
-  const dotsPerMm = getDpi(printSettings) / 25.4
-  const x = protocol === 'zpl' ? (element.x / dotsPerMm) * zoom : (element.x / COORDS_PER_MM) * zoom
-  const y = protocol === 'zpl' ? (element.y / dotsPerMm) * zoom : (element.y / COORDS_PER_MM) * zoom
-
-  const baselineOffsetPx = (() => {
-    if (element.type !== 'text') return 0;
-    const textEl = element as TextElement;
-    const font = getTextFontStyle(textEl, zoom, supportedFonts, protocol, printSettings);
-    const { ascent } = getFontMetricsPx(font);
-    const { scaleY } = getTextScales(textEl, protocol);
-    return ascent * scaleY;
-  })();
+  const x = LabelService.unitsToPx(element.x, zoom, protocol, printSettings)
+  const y = LabelService.unitsToPx(element.y, zoom, protocol, printSettings)
 
   // The Draggable position is the top-left of the bounding box.
   // We subtract translateX/translateY from the pivot (x, y) to get the bounding box top-left.
@@ -1300,20 +950,24 @@ function DraggableElement({ element, zoom, protocol, printSettings, supportedFon
 }
 
 function ElementRenderer({ element, zoom, protocol, printSettings, supportedFonts }: { element: LabelElement, zoom: number, protocol: Protocol, printSettings: PrintSettings, supportedFonts: FontMetadata[] }) {
-  const rotation = ((element.rotation || 0) % 4 + 4) % 4;
+  const { 
+    rotation, 
+    rawWidth, 
+    rawHeight, 
+    rotatedWidth, 
+    rotatedHeight, 
+    translateX, 
+    translateY 
+  } = LabelService.getElementVisualMetadata(element, zoom, supportedFonts, protocol, printSettings);
+  
   const rotationDegrees = rotation * 90;
-
-  const dotsPerMm = getDpi(printSettings) / 25.4
-  const baseDotsToPx = (baseDots: number) => (baseDots / DOTS_PER_MM) * zoom
-  const coordsToPx = (coords: number) => (coords / COORDS_PER_MM) * zoom
-  const zplDotsToPx = (dots: number) => (dots / dotsPerMm) * zoom
 
   const renderContent = () => {
     switch (element.type) {
       case 'text': {
         const textEl = element as TextElement;
-        const font = getTextFontStyle(textEl, zoom, supportedFonts, protocol, printSettings);
-        const { scaleX, scaleY } = getTextScales(textEl, protocol);
+        const font = LabelService.getTextFontStyle(textEl, zoom, supportedFonts, protocol, printSettings);
+        const { scaleX, scaleY } = LabelService.getTextScales(textEl, protocol);
 
         return (
           <div 
@@ -1335,16 +989,7 @@ function ElementRenderer({ element, zoom, protocol, printSettings, supportedFont
       }
       case 'barcode': {
         const barEl = element as BarcodeElement;
-        const targetModuleWidthPx = protocol === 'zpl' ? zplDotsToPx(barEl.width) : baseDotsToPx(barEl.width)
-        const barHeightPx = Math.max(1, protocol === 'zpl' ? zplDotsToPx(barEl.height) : coordsToPx(barEl.height))
-        
-        // Standard barcode modules calculation for Code128/others
-        const modules = (barEl.content?.length ?? 0) * 11 + 35;
-        const targetWidthPx = modules * targetModuleWidthPx;
-        
-        const baseModuleWidth = 2;
-        const baseWidthPx = modules * baseModuleWidth;
-        const scaleX = targetWidthPx / baseWidthPx;
+        const { scaleX, baseModuleWidth, barHeightPx } = LabelService.getBarcodeVisualMetadata(barEl, zoom, protocol, printSettings);
 
         return (
           <div 
@@ -1367,8 +1012,7 @@ function ElementRenderer({ element, zoom, protocol, printSettings, supportedFont
       }
       case 'qrcode': {
         const qrEl = element as QRCodeElement;
-        const moduleSizePx = protocol === 'zpl' ? zplDotsToPx(qrEl.size) : baseDotsToPx(qrEl.size)
-        const sizePx = 21 * moduleSizePx;
+        const { sizePx } = LabelService.getQRCodeVisualMetadata(qrEl, zoom, protocol, printSettings);
         
         return (
           <div>
@@ -1383,7 +1027,7 @@ function ElementRenderer({ element, zoom, protocol, printSettings, supportedFont
       }
       case 'line': {
         const lineEl = element as LineElement;
-        const { dx, dy, thicknessPx, minX, minY, width, height } = getLineBoundingBoxPx(lineEl, zoom, protocol, printSettings);
+        const { dx, dy, thicknessPx, minX, minY, width, height } = LabelService.getLineBoundingBoxPx(lineEl, zoom, protocol, printSettings);
         const x1 = (-minX) + thicknessPx / 2;
         const y1 = (-minY) + thicknessPx / 2;
         const x2 = (dx - minX) + thicknessPx / 2;
@@ -1408,14 +1052,15 @@ function ElementRenderer({ element, zoom, protocol, printSettings, supportedFont
       }
       case 'rectangle': {
         const rectEl = element as RectangleElement;
-        const w = protocol === 'zpl' ? zplDotsToPx(rectEl.width) : coordsToPx(rectEl.width)
-        const h = protocol === 'zpl' ? zplDotsToPx(rectEl.height) : coordsToPx(rectEl.height)
-        const t = Math.max(0.5, protocol === 'zpl' ? zplDotsToPx(rectEl.thickness) : baseDotsToPx(rectEl.thickness))
+        const w = LabelService.unitsToPx(rectEl.width, zoom, protocol, printSettings)
+        const h = LabelService.unitsToPx(rectEl.height, zoom, protocol, printSettings)
+        const t = LabelService.getThicknessPx(rectEl.thickness, zoom, protocol, printSettings)
+        
         return (
           <div 
             style={{ 
               width: `${w}px`, 
-              height: `${h}px`,
+              height: `${h}px`, 
               border: `${t}px solid black`,
               boxSizing: 'border-box'
             }} 
@@ -1426,19 +1071,6 @@ function ElementRenderer({ element, zoom, protocol, printSettings, supportedFont
         return null;
     }
   };
-
-  const { width: rawWidth, height: rawHeight } = getElementSize(element, zoom, supportedFonts, protocol, printSettings);
-  
-  // Calculate bounding box for rotated element
-  const rotationRad = (rotation * 90 * Math.PI) / 180;
-  const cos = Math.abs(Math.cos(rotationRad));
-  const sin = Math.abs(Math.sin(rotationRad));
-  const rotatedWidth = rawWidth * cos + rawHeight * sin;
-  const rotatedHeight = rawWidth * sin + rawHeight * cos;
-
-  // Calculate translation needed to keep content in a positive bounding box if rotated around top-left
-  const translateX = (rotation === 1) ? rawHeight : (rotation === 2 ? rawWidth : (rotation === 3 ? 0 : 0));
-  const translateY = (rotation === 1) ? 0 : (rotation === 2 ? rawHeight : (rotation === 3 ? rawWidth : 0));
 
   return (
     <div 

@@ -90,6 +90,8 @@ export class ZPLDriver implements LabelDriver {
     if (ps?.speed !== undefined) lines.push(`^PR${Math.round(ps.speed)}`)
 
     label.elements.forEach((el) => {
+      lines.push('')
+      lines.push(`^FX Element: ${el.type} (${el.id})`)
       if (el.type === 'text') {
         const textEl = el as TextElement
         const fontCode = getZplFontCode(textEl)

@@ -286,7 +286,8 @@
   "printSettings": {
     "quantity": 1,
     "speed": 3,
-    "darkness": 10
+    "darkness": 10,
+    "dpi": 203
   },
   "protocol": "tpcl"
 }

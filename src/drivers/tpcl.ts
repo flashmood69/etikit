@@ -7,6 +7,8 @@ import {
   LineElement, 
   RectangleElement, 
   COORDS_PER_MM,
+  DOTS_PER_MM,
+  DEFAULT_DPI,
   LabelDriver,
   Protocol,
   FontMetadata,
@@ -101,6 +103,12 @@ export class TPCLDriver implements LabelDriver {
 
   generate(label: LabelTemplate): string {
     const lines: string[] = [];
+    const dpi =
+      typeof label.printSettings?.dpi === 'number' && Number.isFinite(label.printSettings.dpi) && label.printSettings.dpi > 0
+        ? label.printSettings.dpi
+        : DEFAULT_DPI
+    const targetDotsPerMm = dpi / 25.4
+    const baseDotsToTargetDots = (baseDots: number) => Math.max(1, Math.round((baseDots * targetDotsPerMm) / DOTS_PER_MM))
     const normalizeMag = (value: unknown) => {
       if (typeof value !== 'number' || !Number.isFinite(value)) return 10;
       if (value <= 0) return 10;
@@ -153,7 +161,7 @@ export class TPCLDriver implements LabelDriver {
         case 'barcode': {
           const barEl = el as BarcodeElement;
           const barHeight = barEl.height.toString().padStart(4, '0');
-          const narrowBar = barEl.width.toString().padStart(2, '0');
+          const narrowBar = Math.max(1, Math.min(99, baseDotsToTargetDots(barEl.width))).toString().padStart(2, '0');
           const rotationVal = Math.max(0, Math.min(3, Math.round(barEl.rotation || 0))).toString();
           const barcodeType = BARCODE_MAP[barEl.barcodeType] || '9';
           
@@ -168,7 +176,7 @@ export class TPCLDriver implements LabelDriver {
 
         case 'qrcode': {
           const qrEl = el as QRCodeElement;
-          const qrSize = Math.max(1, Math.min(20, Math.round(qrEl.size))).toString().padStart(2, '0');
+          const qrSize = Math.max(1, Math.min(20, baseDotsToTargetDots(qrEl.size))).toString().padStart(2, '0');
           const qrRotation = Math.max(0, Math.min(3, Math.round(qrEl.rotation || 0))).toString();
           const errorCorrection = qrEl.errorCorrection || 'H';
 
@@ -184,7 +192,7 @@ export class TPCLDriver implements LabelDriver {
           const lineEl = el as LineElement;
           const x2 = lineEl.x2.toString().padStart(4, '0');
           const y2 = lineEl.y2.toString().padStart(4, '0');
-          graphicCommands.push(`{LC;${x},${y},${x2},${y2},0,${lineEl.thickness}|}`);
+          graphicCommands.push(`{LC;${x},${y},${x2},${y2},0,${baseDotsToTargetDots(lineEl.thickness)}|}`);
           break;
         }
 
@@ -207,9 +215,9 @@ export class TPCLDriver implements LabelDriver {
     if (ps) {
       const quantity = ps.quantity.toString().padStart(4, '0');
       // Format: {XS;issueMode,quantity,sets(hardcoded 0002 for now),speed,sensor,rotation(0),status|}
-      lines.push(`{XS;I,${quantity},0002C52200|}`);
+      lines.push(`{XS;I,${quantity},0002C5200|}`);
     } else {
-      lines.push('{XS;I,0001,0002C52200|}');
+      lines.push('{XS;I,0001,0002C5200|}');
     }
 
     return lines.join('\r\n');
@@ -219,11 +227,13 @@ export class TPCLDriver implements LabelDriver {
     const elements: LabelElement[] = [];
     let width = 100;
     let height = 150;
+    let printSettings: LabelTemplate['printSettings'] | undefined
 
     const commands = tpcl.match(/\{[^}]+\|?\}/g) || [];
 
     const textDefs = new Map<string, any>();
     const barcodeDefs = new Map<string, any>();
+    const dotLikeValues: number[] = [];
 
     commands.forEach(cmd => {
       const cleanCmd = cmd.replace(/^\{/, '').replace(/\|?\}$/, '');
@@ -245,6 +255,8 @@ export class TPCLDriver implements LabelDriver {
       } else if (commandType === 'LC') {
         const params = parts[1].split(',');
         if (params.length >= 6) {
+          const thickness = parseInt(params[5])
+          if (Number.isFinite(thickness) && thickness > 0) dotLikeValues.push(thickness)
           elements.push({
             id: Math.random().toString(36).substring(2, 11),
             type: 'line',
@@ -253,7 +265,7 @@ export class TPCLDriver implements LabelDriver {
             rotation: 0,
             x2: parseInt(params[2]),
             y2: parseInt(params[3]),
-            thickness: parseInt(params[5])
+            thickness
           });
         }
       } else if (commandType === 'XR') {
@@ -304,6 +316,10 @@ export class TPCLDriver implements LabelDriver {
         }
       } else if (commandType.startsWith('XB')) {
         const params = parts[1].split(',');
+        if (params.length >= 5) {
+          const v = parseInt(params[4])
+          if (Number.isFinite(v) && v > 0) dotLikeValues.push(v)
+        }
         barcodeDefs.set(commandType, {
           params,
           id: Math.random().toString(36).substring(2, 11)
@@ -339,14 +355,88 @@ export class TPCLDriver implements LabelDriver {
              });
           }
         }
+      } else if (commandType === 'XS') {
+        const rest = parts[1] || ''
+        const xsParams = rest.split(',')
+        const q = parseInt(xsParams[1] || '', 10)
+        if (Number.isFinite(q)) printSettings = { ...(printSettings || { quantity: 1 }), quantity: Math.max(1, q) }
       }
     });
+
+    const inferDpi = (values: number[]) => {
+      const candidates = [DEFAULT_DPI, 300, 600]
+      if (values.length === 0) return DEFAULT_DPI
+
+      let best = DEFAULT_DPI
+      let bestScore = Number.NEGATIVE_INFINITY
+      const preferredBaseDots = [2, 3, 5, 6, 7, 10, 12, 15, 20]
+
+      for (const dpi of candidates) {
+        const targetDotsPerMm = dpi / 25.4
+        let score = 0
+        for (const v of values) {
+          if (!Number.isFinite(v) || v <= 0) continue
+          const base = (v * DOTS_PER_MM) / targetDotsPerMm
+          if (!Number.isFinite(base)) continue
+          if (base < 0.5 || base > 120) {
+            score -= 3
+            continue
+          }
+          const nearest = Math.round(base)
+          const diff = Math.abs(base - nearest)
+          score -= diff
+          if (nearest < 1 || nearest > 99) {
+            score -= 2
+            continue
+          }
+
+          let bestDist = Number.POSITIVE_INFINITY
+          for (const p of preferredBaseDots) {
+            bestDist = Math.min(bestDist, Math.abs(nearest - p))
+          }
+          score += 2 - bestDist * 0.8
+        }
+        if (score > bestScore) {
+          bestScore = score
+          best = dpi
+        }
+      }
+      return best
+    }
+
+    const sourceDpi = inferDpi(dotLikeValues)
+    const sourceTargetDotsPerMm = sourceDpi / 25.4
+    const targetDotsToBaseDots = (dots: number) =>
+      Math.max(1, Math.min(99, Math.round((dots * DOTS_PER_MM) / sourceTargetDotsPerMm)))
+
+    for (const el of elements) {
+      if (el.type === 'barcode') {
+        const bar = el as BarcodeElement
+        bar.width = targetDotsToBaseDots(bar.width)
+        continue
+      }
+      if (el.type === 'qrcode') {
+        const qr = el as QRCodeElement
+        qr.size = targetDotsToBaseDots(qr.size)
+        continue
+      }
+      if (el.type === 'line') {
+        const line = el as LineElement
+        line.thickness = targetDotsToBaseDots(line.thickness)
+        continue
+      }
+    }
+
+    if (!printSettings) printSettings = { quantity: 1 }
+    if (printSettings.quantity === undefined) printSettings.quantity = 1
+    printSettings.dpi = sourceDpi
 
     return {
       name: 'Imported TPCL',
       width,
       height,
       elements,
+      printSettings,
       protocol: 'tpcl'
     };
   }

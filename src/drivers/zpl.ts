@@ -2,6 +2,7 @@ import {
   BarcodeElement,
   COORDS_PER_MM,
   DOTS_PER_MM,
+  DEFAULT_DPI,
   LabelDriver,
   LabelElement,
   LabelTemplate,
@@ -49,13 +50,17 @@ function getZplFontCode(el: TextElement): string {
 
 export class ZPLDriver implements LabelDriver {
   protocol: Protocol = 'zpl';
-  supportedExtensions = ['.ezpl'];
+  supportedExtensions = ['.ezpl', '.zpl'];
   supportedFonts = ZPL_FONT_METADATA;
   supportedBarcodes = ZPL_BARCODE_METADATA;
 
   generate(label: LabelTemplate): string {
     const TEXT_FONT_SIZE_SCALE = 1.4
-    const targetDotsPerMm = label.printSettings?.zplDotsPerMm ?? DOTS_PER_MM
+    const dpi =
+      typeof label.printSettings?.dpi === 'number' && Number.isFinite(label.printSettings.dpi) && label.printSettings.dpi > 0
+        ? label.printSettings.dpi
+        : DEFAULT_DPI
+    const targetDotsPerMm = dpi / 25.4
 
     const coordsToDots = (coords: number) => Math.max(0, Math.round((coords * targetDotsPerMm) / COORDS_PER_MM))
     const mmToDots = (mm: number) => Math.max(0, Math.round(mm * targetDotsPerMm))
@@ -473,8 +478,8 @@ export class ZPLDriver implements LabelDriver {
     }
 
     const inferDotsPerMm = (wDots: number, hDots: number, textHeightsDots: number[]) => {
-      const candidates = [DOTS_PER_MM, 11.811, 23.622]
-      let best = DOTS_PER_MM
+      const candidatesDpi = [DEFAULT_DPI, 300, 600]
+      let best = DEFAULT_DPI / 25.4
       let bestScore = Number.NEGATIVE_INFINITY
 
       const median = (arr: number[]) => {
@@ -485,7 +490,8 @@ export class ZPLDriver implements LabelDriver {
 
       const typicalTextHeightDots = median(textHeightsDots)
 
-      for (const cand of candidates) {
+      for (const dpi of candidatesDpi) {
+        const cand = dpi / 25.4
         const widthMmCand = wDots / cand
         const heightMmCand = hDots / cand
         let score = 0
@@ -661,7 +667,7 @@ export class ZPLDriver implements LabelDriver {
 
     if (!printSettings) printSettings = { quantity: 1 }
     if (printSettings.quantity === undefined) printSettings.quantity = 1
-    printSettings.zplDotsPerMm = sourceDotsPerMm
+    printSettings.dpi = Math.round(sourceDotsPerMm * 25.4)
 
     return {
       name: 'Imported ZPL',

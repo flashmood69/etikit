@@ -1,5 +1,6 @@
 export const COORDS_PER_MM = 10;
 export const DOTS_PER_MM = 8;
+export const DEFAULT_DPI = 203;
 
 export type ElementType = 'text' | 'barcode' | 'qrcode' | 'line' | 'rectangle';
 
@@ -55,7 +56,7 @@ export interface PrintSettings {
   quantity: number;
   speed?: number;
   darkness?: number;
-  zplDotsPerMm?: number;
+  dpi?: number;
 }
 
 export type Protocol = 'zpl' | 'tpcl';

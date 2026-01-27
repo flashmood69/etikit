@@ -1,31 +1,31 @@
 {
-  "name": "Imported ZPL",
+  "name": "sample-zpl",
   "width": 121.5,
   "height": 70.1,
   "elements": [
     {
-      "id": "7ci40f3qs",
+      "id": "06k3gppw2",
       "type": "qrcode",
       "x": 42,
       "y": 254,
       "rotation": 0,
-      "content": "XY,A26019001/5",
+      "content": "26000000/0",
       "size": 3,
       "errorCorrection": "M"
     },
     {
-      "id": "me71ddwv8",
+      "id": "n402fjp79",
       "type": "text",
       "x": 254,
       "y": 83,
       "rotation": 0,
-      "content": "000000123",
+      "content": "ABC012345",
       "fontCode": "0",
-      "width": 181,
+      "width": 180,
       "height": 120
     },
     {
-      "id": "u0ze035ne",
+      "id": "nwolwazxt",
       "type": "text",
       "x": 254,
       "y": 120,
@@ -36,18 +36,18 @@
       "height": 80
     },
     {
-      "id": "tzoyjk7ry",
+      "id": "0ym075u20",
       "type": "text",
       "x": 254,
       "y": 168,
       "rotation": 0,
-      "content": "50000000456",
+      "content": "900000123",
       "fontCode": "0",
-      "width": 181,
+      "width": 180,
       "height": 120
     },
     {
-      "id": "8yebb295s",
+      "id": "8vnrddphn",
       "type": "text",
       "x": 254,
       "y": 209,
@@ -58,7 +58,7 @@
       "height": 80
     },
     {
-      "id": "3bq5elcgr",
+      "id": "833k3vpok",
       "type": "text",
       "x": 762,
       "y": 203,
@@ -69,18 +69,18 @@
       "height": 100
     },
     {
-      "id": "qujocgzm1",
+      "id": "89fa013mt",
       "type": "text",
       "x": 762,
       "y": 246,
       "rotation": 0,
-      "content": "25/01/2026",
+      "content": "27/01/2026",
       "fontCode": "0",
       "width": 70,
       "height": 100
     },
     {
-      "id": "8smsjt2nl",
+      "id": "uv9w5g2e8",
       "type": "text",
       "x": 254,
       "y": 281,
@@ -91,29 +91,29 @@
       "height": 80
     },
     {
-      "id": "6eht98ldr",
+      "id": "z8c3du5mn",
       "type": "text",
       "x": 254,
       "y": 322,
       "rotation": 0,
-      "content": "0,121 kg",
+      "content": "125.875 kg",
       "fontCode": "0",
       "width": 100,
       "height": 100
     },
     {
-      "id": "yy1eametk",
+      "id": "xuw595mf8",
       "type": "text",
       "x": 254,
       "y": 373,
       "rotation": 0,
-      "content": "26019001/5",
+      "content": "26000000/0",
       "fontCode": "0",
       "width": 70,
       "height": 100
     },
     {
-      "id": "bc134taj4",
+      "id": "u9z80wgyr",
       "type": "text",
       "x": 466,
       "y": 373,
@@ -124,7 +124,7 @@
       "height": 100
     },
     {
-      "id": "djzj271an",
+      "id": "ngiorb5j1",
       "type": "text",
       "x": 254,
       "y": 423,
@@ -135,7 +135,7 @@
       "height": 100
     },
     {
-      "id": "az24kggn7",
+      "id": "h90vdji6d",
       "type": "text",
       "x": 254,
       "y": 485,
@@ -146,7 +146,7 @@
       "height": 120
     },
     {
-      "id": "b87i4albw",
+      "id": "1fi7lwdj8",
       "type": "text",
       "x": 254,
       "y": 549,
@@ -157,18 +157,18 @@
       "height": 120
     },
     {
-      "id": "xnzre3ivv",
+      "id": "ovjpliffz",
       "type": "text",
       "x": 635,
       "y": 464,
       "rotation": 0,
-      "content": "40 TEST J.DOE",
+      "content": "40 ABC +XYZ",
       "fontCode": "0",
       "width": 90,
       "height": 120
     },
     {
-      "id": "7t765kvku",
+      "id": "no5k8dx7g",
       "type": "text",
       "x": 635,
       "y": 506,
@@ -179,7 +179,7 @@
       "height": 120
     },
     {
-      "id": "c8r0db11y",
+      "id": "c85xv296h",
       "type": "text",
       "x": 635,
       "y": 549,
@@ -190,7 +190,7 @@
       "height": 120
     },
     {
-      "id": "ewz3bi5c1",
+      "id": "dho88xih2",
       "type": "text",
       "x": 42,
       "y": 591,
@@ -201,7 +201,7 @@
       "height": 120
     },
     {
-      "id": "x2s25vtmf",
+      "id": "stlm1lo4d",
       "type": "text",
       "x": 466,
       "y": 591,
@@ -212,7 +212,7 @@
       "height": 120
     },
     {
-      "id": "ab5gh9d9u",
+      "id": "mltnfgso3",
       "type": "line",
       "x": 601,
       "y": 381,
@@ -222,7 +222,7 @@
       "thickness": 1
     },
     {
-      "id": "dwrq51yyn",
+      "id": "0f8s63k3z",
       "type": "line",
       "x": 237,
       "y": 330,
@@ -232,7 +232,7 @@
       "thickness": 1
     },
     {
-      "id": "2wv4bz23z",
+      "id": "pcjhpf3vs",
       "type": "line",
       "x": 601,
       "y": 330,
@@ -242,7 +242,7 @@
       "thickness": 1
     },
     {
-      "id": "e6axxumru",
+      "id": "dzizsb66x",
       "type": "line",
       "x": 237,
       "y": 42,
@@ -252,12 +252,12 @@
       "thickness": 1
     },
     {
-      "id": "4afb0iln6",
+      "id": "vgveyj0di",
       "type": "barcode",
       "x": 635,
       "y": 288,
       "rotation": 0,
-      "content": "50000000456",
+      "content": "900000123",
       "barcodeType": "code128",
       "width": 2,
       "height": 85,
@@ -266,7 +266,9 @@
   ],
   "printSettings": {
     "quantity": 1,
-    "zplDotsPerMm": 23.622
+    "speed": 3,
+    "darkness": 10,
+    "dpi": 600
   },
   "protocol": "zpl"
 }

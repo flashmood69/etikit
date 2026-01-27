@@ -5,7 +5,7 @@ import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 import Barcode from 'react-barcode'
 import { QRCodeSVG } from 'qrcode.react'
-import { LabelElement, ElementType, TextElement, BarcodeElement, QRCodeElement, LineElement, RectangleElement, LabelTemplate, DOTS_PER_MM, COORDS_PER_MM, PrintSettings, Protocol, FontMetadata } from './types'
+import { LabelElement, ElementType, TextElement, BarcodeElement, QRCodeElement, LineElement, RectangleElement, LabelTemplate, DOTS_PER_MM, COORDS_PER_MM, PrintSettings, Protocol, FontMetadata, DEFAULT_DPI } from './types'
 import { drivers, getDriverForFile } from './drivers'
 
 function cn(...inputs: ClassValue[]) {
@@ -28,6 +28,26 @@ const normalizeTextScale = (val: number) => (val >= 10 ? val / 10 : (val <= 0 ? 
 const MM_PER_PT = 25.4 / 72;
 const TEXT_FONT_SIZE_SCALE = 1.4;
 const textMetricsCache = new Map<string, { ascent: number; descent: number }>();
+const COMMON_DPI_PRESETS = [203, 300, 600]
+const normalizeDpiToPreset = (dpi: number) => {
+  const value = typeof dpi === 'number' && Number.isFinite(dpi) && dpi > 0 ? Math.round(dpi) : DEFAULT_DPI
+  if (COMMON_DPI_PRESETS.includes(value)) return value
+  let best = COMMON_DPI_PRESETS[0] ?? DEFAULT_DPI
+  let bestDiff = Number.POSITIVE_INFINITY
+  for (const preset of COMMON_DPI_PRESETS) {
+    const diff = Math.abs(preset - value)
+    if (diff < bestDiff) {
+      bestDiff = diff
+      best = preset
+    }
+  }
+  return best
+}
+const getDpi = (printSettings: PrintSettings | undefined) => {
+  const dpi = printSettings?.dpi
+  if (typeof dpi !== 'number' || !Number.isFinite(dpi) || dpi <= 0) return DEFAULT_DPI
+  return dpi
+}
 
 function formatMm(value: number) {
   if (!Number.isFinite(value)) return String(value)
@@ -51,6 +71,7 @@ const LABEL_SIZE_PRESETS: LabelSizePreset[] = [
   { id: '102x76', widthMm: 102, heightMm: 76 },
   { id: '102x152', widthMm: 102, heightMm: 152 },
   { id: '100x150', widthMm: 100, heightMm: 150 },
+  { id: '90x50', widthMm: 90, heightMm: 50 },
   { id: '102x51', widthMm: 102, heightMm: 51 },
   { id: '76x51', widthMm: 76, heightMm: 51 },
   { id: '70x50', widthMm: 70, heightMm: 50 },
@@ -58,6 +79,14 @@ const LABEL_SIZE_PRESETS: LabelSizePreset[] = [
   { id: '50x25', widthMm: 50, heightMm: 25 },
   { id: '38x25', widthMm: 38, heightMm: 25 },
 ]
+
+function getFileBaseName(filename: string) {
+  const trimmed = (filename || '').trim()
+  if (trimmed.length === 0) return 'Untitled'
+  const lastDot = trimmed.lastIndexOf('.')
+  if (lastDot <= 0) return trimmed
+  return trimmed.slice(0, lastDot)
+}
 
 function formatInches(valueMm: number) {
   if (!Number.isFinite(valueMm)) return String(valueMm)
@@ -100,7 +129,7 @@ function getTextFontStyle(
   const fontStyle = fontMeta?.fontStyle ?? 'normal';
   const fontSizePx = (() => {
     if (protocol !== 'zpl') return (fontMeta?.fontSizePt ?? 10) * MM_PER_PT * zoom * TEXT_FONT_SIZE_SCALE;
-    const targetDotsPerMm = printSettings?.zplDotsPerMm ?? DOTS_PER_MM;
+    const targetDotsPerMm = getDpi(printSettings) / 25.4;
     const heightDots =
       typeof textEl.height === 'number' && Number.isFinite(textEl.height) && textEl.height > 0
         ? textEl.height
@@ -209,11 +238,13 @@ function App() {
   const [printSettings, setPrintSettings] = useState<PrintSettings>({
     quantity: 1,
     speed: 3,
-    darkness: 10
+    darkness: 10,
+    dpi: DEFAULT_DPI
   });
   const [isNewConfirmOpen, setIsNewConfirmOpen] = useState(false);
   const [newLabelPresetId, setNewLabelPresetId] = useState(DEFAULT_LABEL_SIZE_PRESET_ID);
   const [newProtocol, setNewProtocol] = useState<Protocol>('tpcl');
+  const [newDpi, setNewDpi] = useState<number>(DEFAULT_DPI);
   const editorViewportRef = useRef<HTMLDivElement | null>(null);
   
   const selectedElement = elements.find(el => el.id === selectedId);
@@ -247,7 +278,7 @@ function App() {
           const defaultFont = currentDriver.supportedFonts[0];
           const defaultTextSize = (() => {
             if (protocol !== 'zpl') return { width: 10, height: 10 };
-            const targetDotsPerMm = printSettings?.zplDotsPerMm ?? DOTS_PER_MM;
+            const targetDotsPerMm = getDpi(printSettings) / 25.4;
             const heightDots = Math.max(
               1,
               Math.round((((defaultFont?.fontSizePt ?? 10) * MM_PER_PT) * TEXT_FONT_SIZE_SCALE) * targetDotsPerMm)
@@ -459,17 +490,33 @@ function App() {
         }
 
         if (template && template.elements && Array.isArray(template.elements)) {
+          const rawPs = (template as any).printSettings as any
+          const migratedPs: PrintSettings = (() => {
+            const dpiFromLegacy =
+              template.protocol === 'zpl' &&
+              rawPs &&
+              typeof rawPs.zplDotsPerMm === 'number' &&
+              Number.isFinite(rawPs.zplDotsPerMm) &&
+              rawPs.zplDotsPerMm > 0
+                ? Math.round(rawPs.zplDotsPerMm * 25.4)
+                : undefined
+            const dpi =
+              typeof rawPs?.dpi === 'number' && Number.isFinite(rawPs.dpi) && rawPs.dpi > 0 ? rawPs.dpi : (dpiFromLegacy ?? DEFAULT_DPI)
+            const quantity =
+              typeof rawPs?.quantity === 'number' && Number.isFinite(rawPs.quantity) && rawPs.quantity > 0 ? rawPs.quantity : 1
+            const speed = typeof rawPs?.speed === 'number' && Number.isFinite(rawPs.speed) ? rawPs.speed : 3
+            const darkness = typeof rawPs?.darkness === 'number' && Number.isFinite(rawPs.darkness) ? rawPs.darkness : 10
+            return { quantity, speed, darkness, dpi: normalizeDpiToPreset(dpi) }
+          })()
           setElements(template.elements);
           setLabelSize({ width: roundMm(template.width), height: roundMm(template.height) });
-          setLabelName(template.name || 'Untitled');
-          if (template.printSettings) {
-            setPrintSettings(template.printSettings);
-          }
+          setLabelName(getFileBaseName(file.name));
+          setPrintSettings(migratedPs);
           if (template.protocol) {
             setProtocol(template.protocol);
           } else {
             const lower = file.name.toLowerCase()
-            if (lower.endsWith('.ezpl')) setProtocol('zpl')
+            if (lower.endsWith('.ezpl') || lower.endsWith('.zpl')) setProtocol('zpl')
             if (lower.endsWith('.etec')) setProtocol('tpcl')
           }
           setSelectedId(null);
@@ -486,15 +533,43 @@ function App() {
     e.target.value = '';
   };
 
-  const resetToNew = (size?: { width: number; height: number }, newProtocol?: Protocol) => {
+  const resetToNew = (size?: { width: number; height: number }, newProtocol?: Protocol, dpi?: number) => {
     const nextSize = size ?? { width: 102, height: 76 }
     setElements([]);
     setSelectedId(null);
     setLabelName('Untitled');
     setLabelSize(nextSize);
     if (newProtocol) setProtocol(newProtocol);
-    setPrintSettings({ quantity: 1, speed: 3, darkness: 10 });
+    const nextDpi = typeof dpi === 'number' && Number.isFinite(dpi) && dpi > 0 ? dpi : DEFAULT_DPI
+    setPrintSettings({ quantity: 1, speed: 3, darkness: 10, dpi: nextDpi });
   };
+
+  const setDpiPreservingZplTextSizes = (nextDpiRaw: number) => {
+    const nextDpi = normalizeDpiToPreset(nextDpiRaw)
+    const prevDpi = getDpi(printSettings)
+
+    setPrintSettings({ ...printSettings, dpi: nextDpi })
+
+    if (protocol !== 'zpl') return
+    if (!Number.isFinite(prevDpi) || prevDpi <= 0) return
+    if (!Number.isFinite(nextDpi) || nextDpi <= 0) return
+    if (Math.abs(nextDpi - prevDpi) < 0.001) return
+
+    const ratio = nextDpi / prevDpi
+    setElements((prev) =>
+      prev.map((el) => {
+        if (el.type !== 'text') return el
+        const textEl = el as TextElement
+        const w = typeof textEl.width === 'number' && Number.isFinite(textEl.width) ? textEl.width : 0
+        const h = typeof textEl.height === 'number' && Number.isFinite(textEl.height) ? textEl.height : 0
+        return {
+          ...textEl,
+          width: Math.max(1, Math.round(w * ratio)),
+          height: Math.max(1, Math.round(h * ratio))
+        }
+      })
+    )
+  }
 
   return (
     <div className="flex h-screen w-full flex-col bg-slate-50 text-slate-900 overflow-hidden font-sans">
@@ -517,6 +592,8 @@ function App() {
           <button
             onClick={() => {
               setNewLabelPresetId(DEFAULT_LABEL_SIZE_PRESET_ID);
+              setNewProtocol(protocol);
+              setNewDpi(normalizeDpiToPreset(getDpi(printSettings)));
               setIsNewConfirmOpen(true);
             }}
             className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50 transition-colors"
@@ -527,7 +604,7 @@ function App() {
           <label className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50 transition-colors cursor-pointer">
             <Upload size={16} />
             Load
-            <input type="file" accept=".json,.etec,.ezpl" className="hidden" onChange={loadTemplate} />
+            <input type="file" accept=".json,.etec,.ezpl,.zpl" className="hidden" onChange={loadTemplate} />
           </label>
           <button onClick={saveTemplate} className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50 transition-colors">
             <Save size={16} />
@@ -576,6 +653,18 @@ function App() {
                 </select>
               </div>
               <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">DPI</label>
+                <select
+                  className="mt-2 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                  value={String(normalizeDpiToPreset(newDpi))}
+                  onChange={(e) => setNewDpi(normalizeDpiToPreset(parseInt(e.target.value, 10)))}
+                >
+                  {COMMON_DPI_PRESETS.map((dpi) => (
+                    <option key={dpi} value={dpi}>{dpi}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Label Size</label>
                 <select
                   className="mt-2 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
@@ -603,7 +692,7 @@ function App() {
                     LABEL_SIZE_PRESETS.find((p) => p.id === newLabelPresetId) ??
                     LABEL_SIZE_PRESETS.find((p) => p.id === DEFAULT_LABEL_SIZE_PRESET_ID) ??
                     LABEL_SIZE_PRESETS[0];
-                  resetToNew({ width: preset.widthMm, height: preset.heightMm }, newProtocol);
+                  resetToNew({ width: preset.widthMm, height: preset.heightMm }, newProtocol, newDpi);
                   setIsNewConfirmOpen(false);
                 }}
                 className="rounded-md bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 shadow-sm transition-all active:scale-95"
@@ -950,6 +1039,18 @@ function App() {
                 type="number"
                 step={1}
               />
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-slate-400 uppercase">DPI</label>
+                <select
+                  className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                  value={String(normalizeDpiToPreset(printSettings.dpi ?? DEFAULT_DPI))}
+                  onChange={(e) => setDpiPreservingZplTextSizes(parseInt(e.target.value, 10))}
+                >
+                  {COMMON_DPI_PRESETS.map((dpi) => (
+                    <option key={dpi} value={dpi}>{dpi}</option>
+                  ))}
+                </select>
+              </div>
               <PropertyGrid>
                 <PropertyInput 
                   label="Speed" 
@@ -1009,13 +1110,15 @@ function PropertyInput({
   value, 
   onChange,
   type = 'text',
-  step = 1
+  step = 1,
+  list
 }: { 
   label: string, 
   value: string | number, 
   onChange: (val: string) => void,
   type?: 'text' | 'number',
-  step?: number
+  step?: number,
+  list?: string
 }) {
   const [localValue, setLocalValue] = useState(value.toString());
   const [isFocused, setIsFocused] = useState(false);
@@ -1048,6 +1151,7 @@ function PropertyInput({
           type="text" 
           className="w-full rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all pr-6" 
           value={localValue} 
+          list={list}
           onChange={(e) => {
             setLocalValue(e.target.value);
             onChange(e.target.value);

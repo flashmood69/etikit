@@ -85,13 +85,20 @@ export interface LabelTemplate {
   protocol: Protocol;
 }
 
+export interface GridSettings {
+  enabled: boolean;
+  visible: boolean;
+  size: number; // in mm
+}
+
 export interface EditorState {
   name: string;
   labelSize: { width: number; height: number };
   elements: LabelElement[];
   printSettings: PrintSettings;
   protocol: Protocol;
-  selectedId: string | null;
+  selectedIds: string[];
+  gridSettings: GridSettings;
 }
 
 export interface LabelDriver {

@@ -103,6 +103,14 @@ export function createDefaultPrintSettings(dpi?: number): PrintSettings {
   };
 }
 
+export function createDefaultGridSettings(): { enabled: boolean; visible: boolean; size: number } {
+  return {
+    enabled: false,
+    visible: false,
+    size: 2, // 2mm default
+  };
+}
+
 export function getFileBaseName(filename: string) {
   const trimmed = (filename || '').trim();
   if (trimmed.length === 0) return 'Untitled';

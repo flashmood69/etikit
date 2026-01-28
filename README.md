@@ -1,22 +1,28 @@
 # Etikit
 
 Etikit is a minimalistic, web-based application designed for creating and formatting labels.
-It supports both TPCL and ZPL label formats.
+It supports both TPCL and ZPL label formats with high precision.
 
 ## Features
 
 - **Visual Label Designer**: A simple and intuitive drag-and-drop interface for designing labels.
+- **Precision Alignment Tools**: 
+  - Align elements to left, center, right, top, middle, or bottom.
+  - Distribute multiple elements evenly (horizontally or vertically).
+  - Smart handling of rotations and text baselines for pixel-perfect alignment.
+- **Snap to Grid**: Toggleable grid with customizable size for precise element placement.
+- **History Management**: Full Undo (Ctrl+Z) and Redo (Ctrl+Y) support for all editor actions.
 - **Element Support**: Add and configure text elements, lines, rectangles, barcodes, and QR codes.
 - **TPCL Integration**: Generates printer-ready code following the TPCL specification.
 - **ZPL Integration**: Generates printer-ready code following the ZPL specification. Supports font sizing in dots for high precision.
 - **Font Presets**: Centralized font management using driver-specific font codes.
 - **Template Management**:
-  - Save and load label designs as JSON templates (storing only font codes for efficiency).
-  - Import TPCL/ZPL files (`.tpcl`, `.zpl`, `.txt`) into the designer.
-  - Auto-select export format based on the loaded file type.
-- **Label Size Presets**: Create a new label using common industrial sizes (default: **102 × 76 mm (4" × 3")**).
+  - Save and load label designs as JSON templates.
+  - Import TPCL/ZPL files (`.ezpl`, `.etec`) into the designer.
+  - Export directly to printer-ready files with protocol-specific extensions.
+- **Label Size Presets**: Choose from common industrial sizes or set custom dimensions.
 - **Auto Zoom**: Fit the label to the available editor area with a single toggle.
-- **Minimalistic UI**: Focused on efficiency and ease of use.
+- **Modern UI**: Streamlined interface with icon-only actions and integrated protocol indicators.
 
 ## Tech Stack
 
@@ -55,18 +61,20 @@ It supports both TPCL and ZPL label formats.
 
 ## Usage
 
-- Click **New** to start a new label and choose a label size preset.
-- Use **Auto** in the zoom control to fit the label to the editor.
-- Add elements from the left toolbar, then drag them on the label.
-- Use **Load** to import a JSON template or TPCL/ZPL file.
-- Pick **TPCL** or **ZPL** in the export dropdown (auto-selected after importing), then click **Export**.
+- **Creating**: Click the **+** (New) button to start a new label and choose a size preset.
+- **Designing**: Add elements from the left toolbar, then drag them on the label.
+- **Precision**: Use the alignment buttons in the top bar to position selected elements. Toggle the grid for snapping.
+- **Editing**: Use the right sidebar to adjust properties like content, font, rotation, and size.
+- **History**: Use the Undo/Redo arrows or keyboard shortcuts (Ctrl+Z / Ctrl+Y).
+- **Managing**: Use **Load** (Upload icon) to import files and **Save** (Disk icon) to store templates.
+- **Exporting**: Click **Export** to generate the printer-ready file. The current protocol (ZPL/TPCL) is shown directly on the button.
 
 ## Technical Notes
 
 ### ZPL Font Sizing
 In the ZPL protocol, font width and height are measured in **dots** rather than points (pt) or scale factors. Etikit respects this by:
 - Storing `width` and `height` as dot values for ZPL elements.
-- Converting dots to millimeters (mm) and then to pixels (px) for the designer preview based on the `zplDotsPerMm` setting (default: 8 dots/mm for 203 DPI).
+- Converting dots to millimeters (mm) and then to pixels (px) for the designer preview based on the DPI setting (default: 203 DPI).
 
 ### Font Management
 To simplify templates and ensure driver consistency, Etikit uses a `fontCode` system:

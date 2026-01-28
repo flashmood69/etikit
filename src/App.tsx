@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Plus, Save, FileDown, Type, Barcode as BarcodeIcon, Square, Minus, Trash2, Move, Settings, ChevronDown, ChevronUp, QrCode, Upload, Undo2, Redo2 } from 'lucide-react'
+import { Plus, Save, FileDown, Type, Barcode as BarcodeIcon, Square, Minus, Trash2, Move, Settings, ChevronDown, ChevronUp, QrCode, Upload, Undo2, Redo2, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical, LayoutGrid, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, MousePointer2 } from 'lucide-react'
 import Draggable from 'react-draggable'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
@@ -17,14 +17,15 @@ function cn(...inputs: ClassValue[]) {
 function App() {
   const { state, pushState, undo, redo, canUndo, canRedo, resetState, replaceState } = useHistory({
     elements: [],
-    selectedId: null,
+    selectedIds: [],
     labelSize: { width: 102, height: 76 },
     name: 'Untitled',
     protocol: 'tpcl',
     printSettings: LabelService.createDefaultPrintSettings(),
+    gridSettings: LabelService.createDefaultGridSettings(),
   });
 
-  const { elements, selectedId, labelSize, name: labelName, protocol, printSettings } = state;
+  const { elements, selectedIds, labelSize, name: labelName, protocol, printSettings, gridSettings } = state;
 
   const [zoom, setZoom] = useState(4); // 1mm = 4px
   const [isAutoZoom, setIsAutoZoom] = useState(false);
@@ -40,9 +41,9 @@ function App() {
     pushState({ ...state, elements: nextElements });
   };
 
-  const setSelectedId = (id: string | null) => {
+  const setSelectedIds = (ids: string[]) => {
     // Selection changes should not typically create a new history entry
-    replaceState({ ...state, selectedId: id });
+    replaceState({ ...state, selectedIds: ids });
   };
 
   const setLabelSize = (size: { width: number; height: number }) => {
@@ -60,8 +61,13 @@ function App() {
   const setPrintSettings = (settings: PrintSettings) => {
     pushState({ ...state, printSettings: settings });
   };
+
+  const setGridSettings = (settings: Partial<typeof gridSettings>) => {
+    pushState({ ...state, gridSettings: { ...gridSettings, ...settings } });
+  };
   
-  const selectedElement = elements.find(el => el.id === selectedId);
+  const selectedElements = elements.filter(el => selectedIds.includes(el.id));
+  const selectedElement = selectedElements.length === 1 ? selectedElements[0] : null;
   const currentDriver = drivers[protocol];
 
   const addElement = (type: ElementType) => {
@@ -76,7 +82,7 @@ function App() {
       pushState({
         ...state,
         elements: [...elements, newElement],
-        selectedId: newElement.id
+        selectedIds: [newElement.id]
       });
     } catch (err) {
       console.error(err);
@@ -93,18 +99,148 @@ function App() {
 
   const deleteElement = (id: string) => {
     const nextElements = elements.filter(el => el.id !== id);
-    const nextSelectedId = selectedId === id ? null : selectedId;
+    const nextSelectedIds = selectedIds.filter(selectedId => selectedId !== id);
     pushState({
       ...state,
       elements: nextElements,
-      selectedId: nextSelectedId
+      selectedIds: nextSelectedIds
     });
   };
 
   const handleDrag = (id: string, data: { x: number, y: number }) => {
-    const x = LabelService.pxToUnits(data.x, zoom, protocol, printSettings)
-    const y = LabelService.pxToUnits(data.y, zoom, protocol, printSettings)
+    let x = LabelService.pxToUnits(data.x, zoom, protocol, printSettings)
+    let y = LabelService.pxToUnits(data.y, zoom, protocol, printSettings)
+
+    if (gridSettings.enabled) {
+      const gridSizeUnits = LabelService.mmToUnits(gridSettings.size, protocol, printSettings);
+      x = Math.round(x / gridSizeUnits) * gridSizeUnits;
+      y = Math.round(y / gridSizeUnits) * gridSizeUnits;
+    }
+
     updateElement(id, { x, y });
+  };
+
+  const alignElements = (type: 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom') => {
+    if (selectedIds.length === 0) return;
+
+    const labelWidthUnits = LabelService.mmToUnits(labelSize.width, protocol, printSettings);
+    const labelHeightUnits = LabelService.mmToUnits(labelSize.height, protocol, printSettings);
+
+    const nextElements = elements.map(el => {
+      if (!selectedIds.includes(el.id)) return el;
+
+      const metadata = LabelService.getElementVisualMetadata(
+        el, 
+        zoom, 
+        currentDriver.supportedFonts, 
+        protocol, 
+        printSettings
+      );
+      
+      const rotatedWidthUnits = LabelService.pxToUnits(metadata.rotatedWidth, zoom, protocol, printSettings);
+      const rotatedHeightUnits = LabelService.pxToUnits(metadata.rotatedHeight, zoom, protocol, printSettings);
+      const translateXUnits = LabelService.pxToUnits(metadata.translateX, zoom, protocol, printSettings);
+      const translateYUnits = LabelService.pxToUnits(metadata.translateY, zoom, protocol, printSettings);
+      const baselineOffsetUnits = LabelService.pxToUnits(metadata.baselineOffsetPx, zoom, protocol, printSettings);
+
+      let updates: Partial<LabelElement> = {};
+
+      switch (type) {
+        case 'left': 
+          updates.x = Math.round(translateXUnits); 
+          break;
+        case 'center': 
+          updates.x = Math.round((labelWidthUnits - rotatedWidthUnits) / 2 + translateXUnits); 
+          break;
+        case 'right': 
+          updates.x = Math.round(labelWidthUnits - rotatedWidthUnits + translateXUnits); 
+          break;
+        case 'top': 
+          updates.y = Math.round(translateYUnits + baselineOffsetUnits); 
+          break;
+        case 'middle': 
+          updates.y = Math.round((labelHeightUnits - rotatedHeightUnits) / 2 + translateYUnits + baselineOffsetUnits); 
+          break;
+        case 'bottom': 
+          updates.y = Math.round(labelHeightUnits - rotatedHeightUnits + translateYUnits + baselineOffsetUnits); 
+          break;
+      }
+
+      return LabelService.applyElementUpdates(el, updates);
+    });
+
+    pushState({ ...state, elements: nextElements });
+  };
+
+  const distributeElements = (direction: 'horizontal' | 'vertical') => {
+    if (selectedIds.length < 3) return;
+
+    const selectedEls = elements.filter(el => selectedIds.includes(el.id));
+    
+    // Map elements to their visual metadata for accurate distribution
+    const mappedEls = selectedEls.map(el => {
+      const metadata = LabelService.getElementVisualMetadata(el, zoom, currentDriver.supportedFonts, protocol, printSettings);
+      const rotatedWidthUnits = LabelService.pxToUnits(metadata.rotatedWidth, zoom, protocol, printSettings);
+      const rotatedHeightUnits = LabelService.pxToUnits(metadata.rotatedHeight, zoom, protocol, printSettings);
+      const translateXUnits = LabelService.pxToUnits(metadata.translateX, zoom, protocol, printSettings);
+      const translateYUnits = LabelService.pxToUnits(metadata.translateY, zoom, protocol, printSettings);
+      const baselineOffsetUnits = LabelService.pxToUnits(metadata.baselineOffsetPx, zoom, protocol, printSettings);
+      
+      const visualX = el.x - translateXUnits;
+      const visualY = el.y - translateYUnits - baselineOffsetUnits;
+      
+      return {
+        el,
+        visualX,
+        visualY,
+        visualCenterX: visualX + rotatedWidthUnits / 2,
+        visualCenterY: visualY + rotatedHeightUnits / 2,
+        translateXUnits,
+        translateYUnits,
+        baselineOffsetUnits
+      };
+    });
+
+    const sortedEls = [...mappedEls].sort((a, b) => 
+      direction === 'horizontal' ? a.visualCenterX - b.visualCenterX : a.visualCenterY - b.visualCenterY
+    );
+
+    const first = sortedEls[0];
+    const last = sortedEls[sortedEls.length - 1];
+
+    if (direction === 'horizontal') {
+      const totalSpan = last.visualCenterX - first.visualCenterX;
+      const step = totalSpan / (sortedEls.length - 1);
+      
+      const nextElements = elements.map(el => {
+        const item = sortedEls.find(s => s.el.id === el.id);
+        if (!item) return el;
+        
+        const index = sortedEls.indexOf(item);
+        const targetVisualCenterX = first.visualCenterX + index * step;
+        const targetVisualX = targetVisualCenterX - (item.visualCenterX - item.visualX);
+        const newX = targetVisualX + item.translateXUnits;
+        
+        return LabelService.applyElementUpdates(el, { x: Math.round(newX) });
+      });
+      pushState({ ...state, elements: nextElements });
+    } else {
+      const totalSpan = last.visualCenterY - first.visualCenterY;
+      const step = totalSpan / (sortedEls.length - 1);
+      
+      const nextElements = elements.map(el => {
+        const item = sortedEls.find(s => s.el.id === el.id);
+        if (!item) return el;
+        
+        const index = sortedEls.indexOf(item);
+        const targetVisualCenterY = first.visualCenterY + index * step;
+        const targetVisualY = targetVisualCenterY - (item.visualCenterY - item.visualY);
+        const newY = targetVisualY + item.translateYUnits + item.baselineOffsetUnits;
+        
+        return LabelService.applyElementUpdates(el, { y: Math.round(newY) });
+      });
+      pushState({ ...state, elements: nextElements });
+    }
   };
 
   useEffect(() => {
@@ -174,7 +310,8 @@ function App() {
           name: result.labelName,
           printSettings: result.printSettings,
           protocol: result.protocol,
-          selectedId: null,
+          selectedIds: [],
+          gridSettings: LabelService.createDefaultGridSettings(),
         });
       } else {
         alert('Could not parse file');
@@ -191,11 +328,12 @@ function App() {
     const nextSize = size ?? { width: 102, height: 76 }
     resetState({
       elements: [],
-      selectedId: null,
+      selectedIds: [],
       name: 'Untitled',
       labelSize: nextSize,
       protocol: newProtocol ?? protocol,
       printSettings: LabelService.createDefaultPrintSettings(dpi),
+      gridSettings: LabelService.createDefaultGridSettings(),
     });
   };
 
@@ -240,42 +378,44 @@ function App() {
   return (
     <div className="flex h-screen w-full flex-col bg-slate-50 text-slate-900 overflow-hidden font-sans">
       {/* Header */}
-      <header className="flex items-center justify-between border-b bg-white px-6 py-3 shadow-sm shrink-0">
-        <div className="flex items-center gap-3">
+      <header className="flex items-center justify-between border-b bg-white px-6 py-3 shadow-sm shrink-0 min-h-[64px]">
+        <div className="flex items-center gap-3 w-64 flex-none">
           <div className="bg-blue-600 p-2 rounded-lg shadow-blue-200 shadow-lg">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="3" width="18" height="18" rx="2" />
               <path d="M7 7h10M7 12h10M7 17h10" />
             </svg>
           </div>
-          <div>
+          <div className="hidden sm:block">
             <h1 className="text-lg font-bold tracking-tight leading-none">Etikit</h1>
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Label Designer</span>
           </div>
         </div>
+
+        <div className="flex-1" />
         
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => {
-              setNewLabelPresetId(LabelService.DEFAULT_LABEL_SIZE_PRESET_ID);
-              setNewProtocol(protocol);
-              setNewDpi(LabelService.normalizeDpiToPreset(LabelService.getDpi(printSettings)));
-              setIsNewConfirmOpen(true);
-            }}
-            className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50 transition-colors"
-          >
-            <Plus size={16} />
-            New
-          </button>
-          <label className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50 transition-colors cursor-pointer">
-            <Upload size={16} />
-            Load
-            <input type="file" accept=".json,.etec,.ezpl" className="hidden" onChange={loadTemplate} />
-          </label>
-          <button onClick={saveTemplate} className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50 transition-colors">
-            <Save size={16} />
-            Save
-          </button>
+        <div className="flex items-center justify-end gap-2 flex-none">
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => {
+                setNewLabelPresetId(LabelService.DEFAULT_LABEL_SIZE_PRESET_ID);
+                setNewProtocol(protocol);
+                setNewDpi(LabelService.normalizeDpiToPreset(LabelService.getDpi(printSettings)));
+                setIsNewConfirmOpen(true);
+              }}
+              title="New Label"
+              className="p-2 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition-colors"
+            >
+              <Plus size={18} />
+            </button>
+            <label title="Load Template" className="p-2 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer">
+              <Upload size={18} />
+              <input type="file" accept=".json,.etec,.ezpl" className="hidden" onChange={loadTemplate} />
+            </label>
+            <button onClick={saveTemplate} title="Save Template" className="p-2 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition-colors">
+              <Save size={18} />
+            </button>
+          </div>
           
           <div className="h-6 w-[1px] bg-slate-200 mx-1" />
           
@@ -298,14 +438,55 @@ function App() {
             </button>
           </div>
 
-          <div className="flex items-center gap-2 ml-2">
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-100 border border-slate-200">
-              <span className="text-[10px] font-bold text-slate-400 uppercase">Protocol</span>
-              <span className="text-xs font-bold text-slate-700 uppercase">{protocol}</span>
-            </div>
-            <button onClick={exportLabel} className="flex items-center gap-2 rounded-md bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 shadow-sm transition-all active:scale-95">
+          <div className="h-6 w-[1px] bg-slate-200 mx-1" />
+
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setGridSettings({ enabled: !gridSettings.enabled, visible: !gridSettings.enabled })}
+              title={gridSettings.enabled ? "Disable Snap to Grid" : "Enable Snap to Grid"}
+              className={cn(
+                "p-1.5 rounded-md transition-colors",
+                gridSettings.enabled 
+                  ? "bg-blue-50 text-blue-600 hover:bg-blue-100" 
+                  : "text-slate-500 hover:bg-slate-100"
+              )}
+            >
+              <div className="relative">
+                <LayoutGrid size={18} />
+                {gridSettings.enabled && (
+                  <div className="absolute -top-1 -right-1 w-2 h-2 bg-blue-600 rounded-full border-2 border-blue-50" />
+                )}
+              </div>
+            </button>
+          </div>
+
+          <div className="h-6 w-[1px] bg-slate-200 mx-1" />
+
+          {/* Alignment Tools */}
+          <div className={cn(
+            "flex items-center gap-0.5 px-1.5 py-1 rounded-xl bg-slate-100 border border-slate-200 shadow-sm transition-opacity duration-200",
+            selectedIds.length === 0 && "opacity-40 pointer-events-none"
+          )}>
+            <button onClick={() => alignElements('left')} className="p-1.5 rounded-lg hover:bg-white hover:shadow-sm text-slate-600 transition-all active:scale-90" title="Align Left"><AlignLeft size={16} /></button>
+            <button onClick={() => alignElements('center')} className="p-1.5 rounded-lg hover:bg-white hover:shadow-sm text-slate-600 transition-all active:scale-90" title="Align Center"><AlignCenter size={16} /></button>
+            <button onClick={() => alignElements('right')} className="p-1.5 rounded-lg hover:bg-white hover:shadow-sm text-slate-600 transition-all active:scale-90" title="Align Right"><AlignRight size={16} /></button>
+            <div className="w-px h-4 bg-slate-300 mx-1" />
+            <button onClick={() => alignElements('top')} className="p-1.5 rounded-lg hover:bg-white hover:shadow-sm text-slate-600 transition-all active:scale-90" title="Align Top"><AlignStartVertical size={16} /></button>
+            <button onClick={() => alignElements('middle')} className="p-1.5 rounded-lg hover:bg-white hover:shadow-sm text-slate-600 transition-all active:scale-90" title="Align Middle"><AlignCenterVertical size={16} /></button>
+            <button onClick={() => alignElements('bottom')} className="p-1.5 rounded-lg hover:bg-white hover:shadow-sm text-slate-600 transition-all active:scale-90" title="Align Bottom"><AlignEndVertical size={16} /></button>
+            {selectedIds.length >= 3 && (
+              <>
+                <div className="w-px h-4 bg-slate-300 mx-1" />
+                <button onClick={() => distributeElements('horizontal')} className="p-1.5 rounded-lg hover:bg-white hover:shadow-sm text-slate-600 transition-all active:scale-90" title="Distribute Horizontally"><AlignHorizontalDistributeCenter size={16} /></button>
+                <button onClick={() => distributeElements('vertical')} className="p-1.5 rounded-lg hover:bg-white hover:shadow-sm text-slate-600 transition-all active:scale-90" title="Distribute Vertically"><AlignVerticalDistributeCenter size={16} /></button>
+              </>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 ml-1">
+            <button onClick={exportLabel} className="flex items-center gap-2 rounded-md bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 shadow-sm transition-all active:scale-95 group">
               <FileDown size={16} />
-              Export
+              <span className="hidden lg:inline">Export</span>
             </button>
           </div>
         </div>
@@ -444,15 +625,17 @@ function App() {
                 width: `${labelSize.width * zoom}px`, 
                 height: `${labelSize.height * zoom}px`,
               }}
-              onClick={() => setSelectedId(null)}
+              onClick={() => setSelectedIds([])}
             >
               {/* Grid Pattern */}
-              <div className="absolute inset-0 opacity-[0.03] pointer-events-none" 
-                style={{ 
-                  backgroundImage: `radial-gradient(#000 1px, transparent 1px)`,
-                  backgroundSize: `${zoom}px ${zoom}px`
-                }} 
-              />
+              {gridSettings.visible && (
+                <div className="absolute inset-0 opacity-[0.05] pointer-events-none" 
+                  style={{ 
+                    backgroundImage: `linear-gradient(to right, #000 1px, transparent 1px), linear-gradient(to bottom, #000 1px, transparent 1px)`,
+                    backgroundSize: `${gridSettings.size * zoom}px ${gridSettings.size * zoom}px`
+                  }} 
+                />
+              )}
 
               {elements.map((el) => (
                 <DraggableElement 
@@ -462,8 +645,18 @@ function App() {
                   protocol={protocol}
                   printSettings={printSettings}
                   supportedFonts={currentDriver.supportedFonts}
-                  isSelected={selectedId === el.id}
-                  onSelect={() => setSelectedId(el.id)}
+                  isSelected={selectedIds.includes(el.id)}
+                  onSelect={(e) => {
+                    if (e?.shiftKey) {
+                      if (selectedIds.includes(el.id)) {
+                        setSelectedIds(selectedIds.filter(id => id !== el.id));
+                      } else {
+                        setSelectedIds([...selectedIds, el.id]);
+                      }
+                    } else {
+                      setSelectedIds([el.id]);
+                    }
+                  }}
                   onDrag={(data) => handleDrag(el.id, data)}
                 />
               ))}
@@ -473,9 +666,23 @@ function App() {
 
         {/* Properties Sidebar */}
         <aside className="w-80 border-l bg-white flex flex-col shadow-sm shrink-0">
-          <div className="p-4 border-b flex items-center gap-2 bg-slate-50/50">
-            <Settings size={14} className="text-slate-400" />
-            <h2 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Properties</h2>
+          <div className="p-4 border-b flex items-center justify-between bg-slate-50/50">
+            <div className="flex items-center gap-2">
+              <Settings size={14} className="text-slate-400" />
+              <h2 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Properties</h2>
+            </div>
+            {selectedIds.length > 0 && (
+              <button 
+                onClick={() => {
+                  const nextElements = elements.filter(el => !selectedIds.includes(el.id));
+                  pushState({ ...state, elements: nextElements, selectedIds: [] });
+                }}
+                className="text-red-500 hover:bg-red-50 p-1.5 rounded-md transition-colors"
+                title="Delete selected"
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
           </div>
           
           <div className="flex-1 overflow-y-auto p-5">
@@ -490,14 +697,8 @@ function App() {
                       {selectedElement.type === 'line' && <Minus size={14} />}
                       {selectedElement.type === 'rectangle' && <Square size={14} />}
                     </span>
-                    <span className="text-sm font-bold capitalize">{selectedElement.type}</span>
+                    <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">{selectedElement.type}</span>
                   </div>
-                  <button 
-                    onClick={() => deleteElement(selectedElement.id)}
-                    className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-all"
-                  >
-                    <Trash2 size={16} />
-                  </button>
                 </header>
 
                 {/* Primary Content Field (First) */}
@@ -718,6 +919,53 @@ function App() {
               />
             </PropertyGrid>
 
+            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-6 mb-4">Grid & Snapping</h3>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-slate-700 flex items-center gap-2">
+                  <LayoutGrid size={14} className="text-slate-400" />
+                  Show Grid
+                </label>
+                <button
+                  onClick={() => setGridSettings({ visible: !gridSettings.visible })}
+                  className={cn(
+                    "w-8 h-4 rounded-full transition-colors relative",
+                    gridSettings.visible ? "bg-blue-600" : "bg-slate-200"
+                  )}
+                >
+                  <div className={cn(
+                    "absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all",
+                    gridSettings.visible ? "left-[18px]" : "left-[2px]"
+                  )} />
+                </button>
+              </div>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-slate-700 flex items-center gap-2">
+                  <Move size={14} className="text-slate-400" />
+                  Snap to Grid
+                </label>
+                <button
+                  onClick={() => setGridSettings({ enabled: !gridSettings.enabled })}
+                  className={cn(
+                    "w-8 h-4 rounded-full transition-colors relative",
+                    gridSettings.enabled ? "bg-blue-600" : "bg-slate-200"
+                  )}
+                >
+                  <div className={cn(
+                    "absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all",
+                    gridSettings.enabled ? "left-[18px]" : "left-[2px]"
+                  )} />
+                </button>
+              </div>
+              <PropertyInput 
+                label="Grid Size (mm)" 
+                value={gridSettings.size} 
+                onChange={(val) => setGridSettings({ size: parseFloat(val) || 1 })}
+                type="number"
+                step={0.1}
+              />
+            </div>
+
             <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-6 mb-4">Print Settings</h3>
             <div className="space-y-4">
               <PropertyInput 
@@ -762,11 +1010,16 @@ function App() {
       
       {/* Footer */}
       <footer className="h-8 border-t bg-white px-6 flex items-center justify-between text-[9px] font-bold text-slate-400 uppercase tracking-[0.15em]">
-        <div className="flex gap-6">
+        <div className="flex gap-6 items-center">
           <span className="flex items-center gap-1.5">
             <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
             Ready
           </span>
+          <div className="w-px h-3 bg-slate-200" />
+          <span className="flex items-center gap-1.5">
+            Protocol: <span className="text-blue-600 font-mono tracking-normal">{protocol}</span>
+          </span>
+          <div className="w-px h-3 bg-slate-200" />
           <span>Elements: {elements.length}</span>
         </div>
         <div>
@@ -886,7 +1139,7 @@ function DraggableElement({ element, zoom, protocol, printSettings, supportedFon
   printSettings: PrintSettings,
   supportedFonts: FontMetadata[],
   isSelected: boolean,
-  onSelect: () => void, 
+  onSelect: (e?: React.MouseEvent | React.TouchEvent) => void, 
   onDrag: (data: { x: number, y: number }) => void,
 }) {
   const nodeRef = useRef<HTMLDivElement | null>(null);
@@ -917,7 +1170,7 @@ function DraggableElement({ element, zoom, protocol, printSettings, supportedFon
       }}
       onStart={(e) => {
         e.stopPropagation();
-        onSelect();
+        onSelect(e as unknown as React.MouseEvent);
       }}
       grid={[1, 1]}
     >
@@ -930,7 +1183,7 @@ function DraggableElement({ element, zoom, protocol, printSettings, supportedFon
         )}
         onClick={(e) => {
           e.stopPropagation();
-          onSelect();
+          onSelect(e);
         }}
       >
         <ElementRenderer element={element} zoom={zoom} protocol={protocol} printSettings={printSettings} supportedFonts={supportedFonts} />

@@ -54,7 +54,7 @@
       "fontCode": "G",
       "width": 10,
       "height": 10,
-      "content": "Quant. Richiesta"
+      "content": "Requested quantity"
     },
     {
       "id": "2ptbi9rhl",
@@ -65,7 +65,7 @@
       "fontCode": "H",
       "width": 10,
       "height": 10,
-      "content": "125,875 kg"
+      "content": "125.875 kg"
     },
     {
       "id": "7cuxeff2o",

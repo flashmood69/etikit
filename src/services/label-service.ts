@@ -29,6 +29,7 @@ export const FONT_FAMILY_CSS: Record<string, string> = {
 
 export const MM_PER_PT = 25.4 / 72;
 export const TEXT_FONT_SIZE_SCALE = 1.4;
+const TPCL_SYMBOL_PREVIEW_SCALE = 0.75;
 export const COMMON_DPI_PRESETS = [203, 300, 600];
 
 export type LabelSizePreset = {
@@ -440,10 +441,11 @@ export function getBarcodeVisualMetadata(
   protocol: Protocol,
   printSettings: PrintSettings
 ) {
+  const previewScale = protocol === 'tpcl' ? TPCL_SYMBOL_PREVIEW_SCALE : 1;
   const targetModuleWidthPx = protocol === 'zpl' 
     ? unitsToPx(element.width, zoom, protocol, printSettings) 
-    : baseDotsToPx(element.width, zoom);
-  const barHeightPx = Math.max(1, unitsToPx(element.height, zoom, protocol, printSettings));
+    : baseDotsToPx(element.width, zoom) * previewScale;
+  const barHeightPx = Math.max(1, unitsToPx(element.height, zoom, protocol, printSettings) * previewScale);
   
   // Standard barcode modules calculation for Code128/others
   const modules = (element.content?.length ?? 0) * 11 + 35;
@@ -470,9 +472,10 @@ export function getQRCodeVisualMetadata(
   protocol: Protocol,
   printSettings: PrintSettings
 ) {
+  const previewScale = protocol === 'tpcl' ? TPCL_SYMBOL_PREVIEW_SCALE : 1;
   const moduleSizePx = protocol === 'zpl' 
     ? unitsToPx(element.size, zoom, protocol, printSettings) 
-    : baseDotsToPx(element.size, zoom);
+    : baseDotsToPx(element.size, zoom) * previewScale;
   const sizePx = 21 * moduleSizePx;
   
   return {
@@ -529,16 +532,16 @@ export function getElementSize(element: LabelElement, zoom: number, supportedFon
     return { width: maxLineWidth * scaleX, height: lines.length * lineHeightPx * scaleY };
   }
   if (element.type === 'barcode') {
-    const targetModuleWidthPx = protocol === 'zpl' ? zplDotsToPx(element.width) : baseDotsToPx(element.width);
-    const barHeightPx = Math.max(1, protocol === 'zpl' ? zplDotsToPx(element.height) : coordsToPx(element.height));
-    const modules = (element.content?.length ?? 0) * 11 + 35;
-    return { width: modules * targetModuleWidthPx, height: barHeightPx };
+    const { targetWidthPx, barHeightPx } = getBarcodeVisualMetadata(
+      element as BarcodeElement,
+      zoom,
+      protocol,
+      printSettings
+    );
+    return { width: targetWidthPx, height: barHeightPx };
   }
   if (element.type === 'qrcode') {
-    const qrEl = element as QRCodeElement;
-    const moduleSizePx = protocol === 'zpl' ? zplDotsToPx(qrEl.size) : baseDotsToPx(qrEl.size);
-    const modules = 21;
-    const sizePx = modules * moduleSizePx;
+    const { sizePx } = getQRCodeVisualMetadata(element as QRCodeElement, zoom, protocol, printSettings);
     return { width: sizePx, height: sizePx };
   }
   if (element.type === 'line') {

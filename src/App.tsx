@@ -120,6 +120,101 @@ function App() {
     updateElement(id, { x, y });
   };
 
+  const handleResize = (
+    id: string,
+    screenScaleX: number,
+    screenScaleY: number,
+    anchorX: 'left' | 'right',
+    anchorY: 'top' | 'bottom'
+  ) => {
+    const element = elements.find(el => el.id === id);
+    if (!element) return;
+
+    const metadata = LabelService.getElementVisualMetadata(
+      element,
+      zoom,
+      currentDriver.supportedFonts,
+      protocol,
+      printSettings
+    );
+    const localScaleX = metadata.rotation % 2 === 0 ? screenScaleX : screenScaleY;
+    const localScaleY = metadata.rotation % 2 === 0 ? screenScaleY : screenScaleX;
+    const scaleUnits = (value: number, scale: number) => Math.max(1, Math.round(value * scale));
+    let updates: Partial<LabelElement>;
+
+    switch (element.type) {
+      case 'text':
+        updates = {
+          width: protocol === 'zpl'
+            ? scaleUnits(element.width, localScaleX)
+            : Math.max(0.1, Math.round(element.width * localScaleX * 10) / 10),
+          height: protocol === 'zpl'
+            ? scaleUnits(element.height, localScaleY)
+            : Math.max(0.1, Math.round(element.height * localScaleY * 10) / 10)
+        };
+        break;
+      case 'barcode':
+        updates = {
+          width: scaleUnits(element.width, localScaleX),
+          height: scaleUnits(element.height, localScaleY)
+        };
+        break;
+      case 'qrcode': {
+        const scale = Math.sqrt(localScaleX * localScaleY);
+        updates = { size: scaleUnits(element.size, scale) };
+        break;
+      }
+      case 'line':
+        updates = {
+          x2: element.x + (element.x2 - element.x) * localScaleX,
+          y2: element.y + (element.y2 - element.y) * localScaleY
+        };
+        break;
+      case 'rectangle':
+        updates = {
+          width: scaleUnits(element.width, localScaleX),
+          height: scaleUnits(element.height, localScaleY)
+        };
+        break;
+    }
+
+    const resizedElement = LabelService.applyElementUpdates(element, updates);
+    const resizedMetadata = LabelService.getElementVisualMetadata(
+      resizedElement,
+      zoom,
+      currentDriver.supportedFonts,
+      protocol,
+      printSettings
+    );
+    const anchoredShiftX = anchorX === 'right'
+      ? metadata.rotatedWidth - resizedMetadata.rotatedWidth
+      : 0;
+    const anchoredShiftY = anchorY === 'bottom'
+      ? metadata.rotatedHeight - resizedMetadata.rotatedHeight
+      : 0;
+    const pivotXAdjustment = LabelService.pxToUnits(
+      anchoredShiftX + resizedMetadata.translateX - metadata.translateX,
+      zoom,
+      protocol,
+      printSettings
+    );
+    const pivotYAdjustment = LabelService.pxToUnits(
+      anchoredShiftY + resizedMetadata.translateY + resizedMetadata.baselineOffsetPx - metadata.translateY - metadata.baselineOffsetPx,
+      zoom,
+      protocol,
+      printSettings
+    );
+
+    const finalElement = LabelService.applyElementUpdates(resizedElement, {
+      x: element.x + pivotXAdjustment,
+      y: element.y + pivotYAdjustment
+    });
+    pushState({
+      ...state,
+      elements: elements.map(el => el.id === id ? finalElement : el)
+    });
+  };
+
   const alignElements = (type: 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom') => {
     if (selectedIds.length === 0) return;
 
@@ -658,6 +753,9 @@ function App() {
                     }
                   }}
                   onDrag={(data) => handleDrag(el.id, data)}
+                  onResize={(scaleX, scaleY, anchorX, anchorY) =>
+                    handleResize(el.id, scaleX, scaleY, anchorX, anchorY)
+                  }
                 />
               ))}
             </div>
@@ -1132,7 +1230,7 @@ function PropertyInput({
   )
 }
 
-function DraggableElement({ element, zoom, protocol, printSettings, supportedFonts, isSelected, onSelect, onDrag }: { 
+function DraggableElement({ element, zoom, protocol, printSettings, supportedFonts, isSelected, onSelect, onDrag, onResize }: {
   element: LabelElement, 
   zoom: number,
   protocol: Protocol,
@@ -1141,13 +1239,28 @@ function DraggableElement({ element, zoom, protocol, printSettings, supportedFon
   isSelected: boolean,
   onSelect: (e?: React.MouseEvent | React.TouchEvent) => void, 
   onDrag: (data: { x: number, y: number }) => void,
+  onResize: (scaleX: number, scaleY: number, anchorX: 'left' | 'right', anchorY: 'top' | 'bottom') => void,
 }) {
   const nodeRef = useRef<HTMLDivElement | null>(null);
+  const resizeStartRef = useRef<{
+    clientX: number;
+    clientY: number;
+    handleX: -1 | 1;
+    handleY: -1 | 1;
+  } | null>(null);
+  const [resizeScale, setResizeScale] = useState<{
+    x: number;
+    y: number;
+    originX: 'left' | 'right';
+    originY: 'top' | 'bottom';
+  } | null>(null);
   
   const {
     translateX,
     translateY,
-    baselineOffsetPx
+    baselineOffsetPx,
+    rotatedWidth,
+    rotatedHeight
   } = LabelService.getElementVisualMetadata(element, zoom, supportedFonts, protocol, printSettings);
 
   const x = LabelService.unitsToPx(element.x, zoom, protocol, printSettings)
@@ -1157,11 +1270,33 @@ function DraggableElement({ element, zoom, protocol, printSettings, supportedFon
   // We subtract translateX/translateY from the pivot (x, y) to get the bounding box top-left.
   const visualX = x - translateX;
   const visualY = (y - baselineOffsetPx) - translateY;
+  const resizeCorners = [
+    { name: 'top-left', handleX: -1 as const, handleY: -1 as const, position: '-left-1.5 -top-1.5', cursor: 'cursor-nwse-resize' },
+    { name: 'top-right', handleX: 1 as const, handleY: -1 as const, position: '-right-1.5 -top-1.5', cursor: 'cursor-nesw-resize' },
+    { name: 'bottom-left', handleX: -1 as const, handleY: 1 as const, position: '-left-1.5 -bottom-1.5', cursor: 'cursor-nesw-resize' },
+    { name: 'bottom-right', handleX: 1 as const, handleY: 1 as const, position: '-right-1.5 -bottom-1.5', cursor: 'cursor-nwse-resize' }
+  ];
+
+  const getResizeScales = (clientX: number, clientY: number) => {
+    const start = resizeStartRef.current;
+    if (!start) return null;
+    let scaleX = Math.max(0.05, (rotatedWidth + (clientX - start.clientX) * start.handleX) / Math.max(1, rotatedWidth));
+    let scaleY = Math.max(0.05, (rotatedHeight + (clientY - start.clientY) * start.handleY) / Math.max(1, rotatedHeight));
+
+    if (element.type === 'qrcode') {
+      const uniformScale = Math.sqrt(scaleX * scaleY);
+      scaleX = uniformScale;
+      scaleY = uniformScale;
+    }
+
+    return { scaleX, scaleY };
+  };
 
   return (
     <Draggable
       nodeRef={nodeRef}
       position={{ x: visualX, y: visualY }}
+      cancel=".resize-handle"
       onStop={(_, data) => {
         // When stopping, we add back the translation to get the actual pivot coordinate
         const realX = data.x + translateX;
@@ -1176,27 +1311,79 @@ function DraggableElement({ element, zoom, protocol, printSettings, supportedFon
     >
       <div 
         ref={nodeRef}
-        className={cn(
-          "absolute cursor-move select-none group",
-          isSelected && "ring-2 ring-blue-500 ring-offset-2 z-50",
-          !isSelected && "hover:ring-1 hover:ring-blue-300"
-        )}
+        className={cn("absolute cursor-move select-none group", isSelected && "z-50")}
         onClick={(e) => {
           e.stopPropagation();
           onSelect(e);
         }}
       >
-        <ElementRenderer element={element} zoom={zoom} protocol={protocol} printSettings={printSettings} supportedFonts={supportedFonts} />
-        
-        {/* Selection handles (visual only for now) */}
-        {isSelected && (
-          <>
-            <div className="absolute -top-1 -left-1 w-2 h-2 bg-white border border-blue-500 rounded-sm" />
-            <div className="absolute -top-1 -right-1 w-2 h-2 bg-white border border-blue-500 rounded-sm" />
-            <div className="absolute -bottom-1 -left-1 w-2 h-2 bg-white border border-blue-500 rounded-sm" />
-            <div className="absolute -bottom-1 -right-1 w-2 h-2 bg-white border border-blue-500 rounded-sm" />
-          </>
-        )}
+        <div
+          className={cn(
+            "relative group",
+            isSelected && "ring-2 ring-blue-500 ring-offset-2",
+            !isSelected && "hover:ring-1 hover:ring-blue-300"
+          )}
+          style={{
+            transform: resizeScale ? `scale(${resizeScale.x}, ${resizeScale.y})` : undefined,
+            transformOrigin: resizeScale ? `${resizeScale.originX} ${resizeScale.originY}` : 'top left'
+          }}
+        >
+          <ElementRenderer element={element} zoom={zoom} protocol={protocol} printSettings={printSettings} supportedFonts={supportedFonts} />
+          {isSelected && (
+            resizeCorners.map(({ name, handleX, handleY, position, cursor }) => (
+              <button
+                key={name}
+                type="button"
+                aria-label={`Resize selected object from ${name}`}
+                title="Drag to resize"
+                className={`resize-handle absolute ${position} z-10 h-3 w-3 rounded-sm border border-blue-600 bg-white p-0 shadow-sm ${cursor}`}
+                onClick={(e) => e.stopPropagation()}
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  resizeStartRef.current = { clientX: e.clientX, clientY: e.clientY, handleX, handleY };
+                  setResizeScale({
+                    x: 1,
+                    y: 1,
+                    originX: handleX === 1 ? 'left' : 'right',
+                    originY: handleY === 1 ? 'top' : 'bottom'
+                  });
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                }}
+                onPointerMove={(e) => {
+                  const scales = getResizeScales(e.clientX, e.clientY);
+                  const start = resizeStartRef.current;
+                  if (!scales || !start) return;
+                  setResizeScale({
+                    x: scales.scaleX,
+                    y: scales.scaleY,
+                    originX: start.handleX === 1 ? 'left' : 'right',
+                    originY: start.handleY === 1 ? 'top' : 'bottom'
+                  });
+                }}
+                onPointerUp={(e) => {
+                  const scales = getResizeScales(e.clientX, e.clientY);
+                  const start = resizeStartRef.current;
+                  if (scales && start) {
+                    onResize(
+                      scales.scaleX,
+                      scales.scaleY,
+                      start.handleX === 1 ? 'left' : 'right',
+                      start.handleY === 1 ? 'top' : 'bottom'
+                    );
+                  }
+                  resizeStartRef.current = null;
+                  setResizeScale(null);
+                  e.currentTarget.releasePointerCapture(e.pointerId);
+                }}
+                onPointerCancel={() => {
+                  resizeStartRef.current = null;
+                  setResizeScale(null);
+                }}
+              />
+            ))
+          )}
+        </div>
       </div>
     </Draggable>
   );

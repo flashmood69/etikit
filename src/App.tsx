@@ -1441,6 +1441,7 @@ function ElementRenderer({ element, zoom, protocol, printSettings, supportedFont
           >
             <Barcode 
               value={barEl.content || ' '} 
+              format={protocol === 'zpl' && barEl.barcodeType === 'code128' ? 'CODE128B' : undefined}
               width={baseModuleWidth}
               height={barHeightPx}
               displayValue={false}

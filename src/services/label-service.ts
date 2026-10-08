@@ -29,7 +29,9 @@ export const FONT_FAMILY_CSS: Record<string, string> = {
 
 export const MM_PER_PT = 25.4 / 72;
 export const TEXT_FONT_SIZE_SCALE = 1.4;
-const TPCL_SYMBOL_PREVIEW_SCALE = 0.75;
+const ZPL_FONT_ZERO_WIDTH_SCALE = 0.8;
+// TPCL barcode/QR module fields correspond to about 12 modules per mm.
+const TPCL_SYMBOL_MODULE_SCALE = 2 / 3;
 export const COMMON_DPI_PRESETS = [203, 300, 600];
 
 export type LabelSizePreset = {
@@ -224,7 +226,8 @@ export function getTextScales(textEl: TextElement, protocol: Protocol) {
   if (protocol === 'zpl') {
     const widthDots = typeof textEl.width === 'number' && Number.isFinite(textEl.width) ? textEl.width : 0;
     const heightDots = typeof textEl.height === 'number' && Number.isFinite(textEl.height) ? textEl.height : 0;
-    const scaleX = widthDots > 0 && heightDots > 0 ? (widthDots / heightDots) : 1;
+    const fontWidthCorrection = textEl.fontCode === '0' ? ZPL_FONT_ZERO_WIDTH_SCALE : 1;
+    const scaleX = (widthDots > 0 && heightDots > 0 ? (widthDots / heightDots) : 1) * fontWidthCorrection;
     return { scaleX, scaleY: 1 };
   }
   const scaleX = normalizeTextScale(textEl.width || 10);
@@ -245,7 +248,7 @@ export function getTextFontStyle(
   const fontWeight = fontMeta?.fontWeight ?? 'normal';
   const fontStyle = fontMeta?.fontStyle ?? 'normal';
   const fontSizePx = (() => {
-    if (protocol !== 'zpl') return (fontMeta?.fontSizePt ?? 10) * MM_PER_PT * zoom * TEXT_FONT_SIZE_SCALE;
+    if (protocol === 'tpcl') return (fontMeta?.fontSizePt ?? 10) * MM_PER_PT * zoom;
     const targetDotsPerMm = getDpi(printSettings) / 25.4;
     const heightDots =
       typeof textEl.height === 'number' && Number.isFinite(textEl.height) && textEl.height > 0
@@ -352,6 +355,87 @@ export function baseDotsToPx(dots: number, zoom: number) {
   return (dots / DOTS_PER_MM) * zoom;
 }
 
+function getCode128ModuleCount(value: string) {
+  const countSetA = (input: string): number => {
+    const untilC = input.match(/^([\x00-\x5F\xC8-\xCF]+?)([0-9]{2}(?:[0-9]{2})+)([^0-9]|$)/);
+    if (untilC) return untilC[1].length + 1 + countSetC(input.slice(untilC[1].length));
+    const chars = input.match(/^[\x00-\x5F\xC8-\xCF]+/)?.[0] ?? '';
+    if (chars.length === 0) return input.length;
+    return chars.length === input.length ? chars.length : chars.length + 1 + countSetB(input.slice(chars.length));
+  };
+  const countSetB = (input: string): number => {
+    const untilC = input.match(/^([\x20-\x7F\xC8-\xCF]+?)([0-9]{2}(?:[0-9]{2})+)([^0-9]|$)/);
+    if (untilC) return untilC[1].length + 1 + countSetC(input.slice(untilC[1].length));
+    const chars = input.match(/^[\x20-\x7F\xC8-\xCF]+/)?.[0] ?? '';
+    if (chars.length === 0) return input.length;
+    return chars.length === input.length ? chars.length : chars.length + 1 + countSetA(input.slice(chars.length));
+  };
+  const countSetC = (input: string): number => {
+    const pairs = input.match(/^(?:\xCF*[0-9]{2}\xCF*)+/)?.[0] ?? '';
+    const remaining = input.slice(pairs.length);
+    if (remaining.length === 0) return pairs.replace(/\xCF/g, '').length / 2;
+    const setA = remaining.match(/^[\x00-\x5F\xC8-\xCF]*/)?.[0].length ?? 0;
+    const setB = remaining.match(/^[\x20-\x7F\xC8-\xCF]*/)?.[0].length ?? 0;
+    return pairs.replace(/\xCF/g, '').length / 2 + 1 + (setA >= setB
+      ? countSetA(remaining)
+      : countSetB(remaining));
+  };
+
+  const initialSetC = (value.match(/^(?:\xCF*[0-9]{2}\xCF*)+/)?.[0].length ?? 0) >= 2;
+  const setA = value.match(/^[\x00-\x5F\xC8-\xCF]*/)?.[0].length ?? 0;
+  const setB = value.match(/^[\x20-\x7F\xC8-\xCF]*/)?.[0].length ?? 0;
+  const encodedSymbols = initialSetC
+    ? 1 + countSetC(value)
+    : 1 + (setA > setB ? countSetA(value) : countSetB(value));
+
+  // Code 128 adds a checksum symbol and a 13-module stop pattern.
+  return (encodedSymbols + 1) * 11 + 13;
+}
+
+const QR_ECC_CODEWORDS_PER_BLOCK = [
+  [-1, 7, 10, 15, 20, 26, 18, 20, 24, 30, 18],
+  [-1, 10, 16, 26, 18, 24, 16, 18, 22, 22, 26],
+  [-1, 13, 22, 18, 26, 18, 24, 18, 22, 20, 24],
+  [-1, 17, 28, 22, 16, 22, 28, 26, 26, 24, 28]
+];
+const QR_ECC_BLOCK_COUNT = [
+  [-1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 4],
+  [-1, 1, 1, 1, 2, 2, 4, 4, 4, 5, 5],
+  [-1, 1, 1, 2, 2, 4, 4, 4, 5, 5, 5],
+  [-1, 1, 1, 2, 4, 4, 4, 5, 6, 8, 8]
+];
+
+function getQRCodeModuleCount(element: QRCodeElement) {
+  const value = element.content ?? '';
+  const levelIndex = ({ L: 0, M: 1, Q: 2, H: 3 } as const)[element.errorCorrection || 'H'];
+  const isNumeric = /^[0-9]+$/.test(value);
+  const isAlphanumeric = /^[0-9A-Z $%*+./:-]+$/.test(value);
+  const byteLength = new TextEncoder().encode(value).length;
+
+  for (let version = 1; version <= 10; version++) {
+    const countBits = version < 10
+      ? (isNumeric ? 10 : isAlphanumeric ? 9 : 8)
+      : (isNumeric ? 12 : isAlphanumeric ? 11 : 16);
+    const dataBits = isNumeric
+      ? Math.floor(value.length / 3) * 10 + [0, 4, 7][value.length % 3]
+      : isAlphanumeric
+        ? Math.floor(value.length / 2) * 11 + (value.length % 2) * 6
+        : byteLength * 8;
+    const characterCount = isNumeric || isAlphanumeric ? value.length : byteLength;
+    if (characterCount >= 2 ** countBits) continue;
+    const usedBits = 4 + countBits + dataBits;
+    const rawModules = version === 1
+      ? 16 * version * version + 128 * version + 64
+      : 16 * version * version + 128 * version + 64
+        - (25 * (Math.floor(version / 7) + 2) - 10) * (Math.floor(version / 7) + 2) + 55;
+    const dataCodewords = Math.floor(rawModules / 8)
+      - QR_ECC_CODEWORDS_PER_BLOCK[levelIndex][version] * QR_ECC_BLOCK_COUNT[levelIndex][version];
+    if (usedBits <= dataCodewords * 8) return version * 4 + 17;
+  }
+
+  return Math.max(57, 17 + 4 * Math.ceil(byteLength / 20));
+}
+
 export function getThicknessPx(thickness: number, zoom: number, protocol: Protocol, printSettings: PrintSettings) {
   return Math.max(0.5, protocol === 'zpl' ? unitsToPx(thickness, zoom, protocol, printSettings) : baseDotsToPx(thickness, zoom));
 }
@@ -441,14 +525,17 @@ export function getBarcodeVisualMetadata(
   protocol: Protocol,
   printSettings: PrintSettings
 ) {
-  const previewScale = protocol === 'tpcl' ? TPCL_SYMBOL_PREVIEW_SCALE : 1;
+  const moduleScale = protocol === 'tpcl' ? TPCL_SYMBOL_MODULE_SCALE : 1;
   const targetModuleWidthPx = protocol === 'zpl' 
     ? unitsToPx(element.width, zoom, protocol, printSettings) 
-    : baseDotsToPx(element.width, zoom) * previewScale;
-  const barHeightPx = Math.max(1, unitsToPx(element.height, zoom, protocol, printSettings) * previewScale);
+    : baseDotsToPx(element.width, zoom) * moduleScale;
+  const barHeightPx = Math.max(1, unitsToPx(element.height, zoom, protocol, printSettings));
   
-  // Standard barcode modules calculation for Code128/others
-  const modules = (element.content?.length ?? 0) * 11 + 35;
+  const modules = element.barcodeType === 'code128'
+    ? protocol === 'zpl'
+      ? (element.content?.length ?? 0) * 11 + 35
+      : getCode128ModuleCount(element.content ?? '')
+    : (element.content?.length ?? 0) * 11 + 35;
   const targetWidthPx = modules * targetModuleWidthPx;
   
   const baseModuleWidth = 2;
@@ -472,11 +559,11 @@ export function getQRCodeVisualMetadata(
   protocol: Protocol,
   printSettings: PrintSettings
 ) {
-  const previewScale = protocol === 'tpcl' ? TPCL_SYMBOL_PREVIEW_SCALE : 1;
+  const moduleScale = protocol === 'tpcl' ? TPCL_SYMBOL_MODULE_SCALE : 1;
   const moduleSizePx = protocol === 'zpl' 
     ? unitsToPx(element.size, zoom, protocol, printSettings) 
-    : baseDotsToPx(element.size, zoom) * previewScale;
-  const sizePx = 21 * moduleSizePx;
+    : baseDotsToPx(element.size, zoom) * moduleScale;
+  const sizePx = getQRCodeModuleCount(element) * moduleSizePx;
   
   return {
     moduleSizePx,

@@ -67,7 +67,7 @@ export class ZPLDriver implements LabelDriver {
       return Math.max(1, Math.round(mm * targetDotsPerMm))
     }
 
-    const estimateAscentDots = (fontHeightDots: number) => Math.round(fontHeightDots * 0.8)
+    const estimateAscentDots = (fontHeightDots: number, ratio = 0.8) => Math.round(fontHeightDots * ratio)
 
     const rotationToZpl = (rotation: number) => {
       const r = ((rotation || 0) % 4 + 4) % 4
@@ -114,8 +114,10 @@ export class ZPLDriver implements LabelDriver {
         )
         const xDots = Math.max(0, Math.round(textEl.x || 0))
         const yBaselineDots = Math.round(textEl.y || 0)
-        const yTopDots = Math.max(0, yBaselineDots - estimateAscentDots(fontHeightDots))
+        const ascentRatio = textEl.zplFieldOriginAscentRatio ?? 0.8
+        const yTopDots = Math.max(0, yBaselineDots - estimateAscentDots(fontHeightDots, ascentRatio))
         lines.push(`^FO${xDots},${yTopDots}`)
+        if (textEl.reverse) lines.push('^FR')
         lines.push(`^A${fontCode}${rotationToZpl(textEl.rotation)},${fontHeightDots},${fontWidthDots}`)
         lines.push(`^FD${safeFieldData(textEl.content ?? '')}^FS`)
         return
@@ -131,6 +133,7 @@ export class ZPLDriver implements LabelDriver {
         const ratio = Math.max(1, Math.round(barEl.ratio ?? 2))
         const showText = barEl.showText === true ? 'Y' : 'N'
         lines.push(`^FO${xDots},${yDots}`)
+        if (barEl.reverse) lines.push('^FR')
         lines.push(`^BY${narrowDots},${ratio},${heightDots}`)
         const data = safeFieldData(barEl.content ?? '')
         if (barEl.barcodeType === 'code39') {
@@ -171,6 +174,7 @@ export class ZPLDriver implements LabelDriver {
         const magnification = Math.max(1, Math.min(20, Math.round(qrEl.size || 0)))
         const ec = (qrEl.errorCorrection || 'H') as string
         lines.push(`^FO${xDots},${yDots}`)
+        if (qrEl.reverse) lines.push('^FR')
         lines.push(`^BQ${orientation},2,${magnification},${ec},7`)
         lines.push(`^FDLA,${safeFieldData(qrEl.content ?? '')}^FS`)
         return
@@ -184,6 +188,7 @@ export class ZPLDriver implements LabelDriver {
         const hDots = Math.max(1, Math.round(rectEl.height || 0))
         const tDots = Math.max(1, Math.round(rectEl.thickness || 0))
         lines.push(`^FO${xDots},${yDots}`)
+        if (rectEl.reverse) lines.push('^FR')
         lines.push(`^GB${wDots},${hDots},${tDots},B,0^FS`)
         return
       }
@@ -200,6 +205,7 @@ export class ZPLDriver implements LabelDriver {
         const hDots = Math.max(1, Math.round(Math.abs(dy)))
 
         lines.push(`^FO${Math.max(0, Math.round(xMin))},${Math.max(0, Math.round(yMin))}`)
+        if (lineEl.reverse) lines.push('^FR')
         if (dx === 0 || dy === 0) {
           const boxW = dx === 0 ? tDots : wDots
           const boxH = dy === 0 ? tDots : hDots
@@ -218,8 +224,6 @@ export class ZPLDriver implements LabelDriver {
   }
 
   parse(content: string): LabelTemplate {
-    const ASCENT_RATIO = 0.8
-
     const zplToRotation = (o?: string) => {
       const c = (o || 'N').toUpperCase()
       if (c === 'R') return 1
@@ -228,18 +232,19 @@ export class ZPLDriver implements LabelDriver {
       return 0
     }
 
-    const estimateAscentDots = (fontHeightDots: number) => Math.round(fontHeightDots * ASCENT_RATIO)
+    const estimateAscentDots = (fontHeightDots: number, fontCode: string) =>
+      Math.round(fontHeightDots * (fontCode === '0' ? 0.7 : 0.5))
 
     const start = content.indexOf('^XA')
     const end = content.lastIndexOf('^XZ')
     const zpl = (start >= 0 && end > start) ? content.slice(start, end + 3) : content
 
     type FieldRecord =
-      | { kind: 'text'; foX: number; foY: number; fontCode: string; o: string; hDots: number; wDots: number; data: string }
-      | { kind: 'barcode'; foX: number; foY: number; type: BarcodeElement['barcodeType']; o: string; hDots: number; showText: boolean; narrowDots: number; ratio: number; data: string }
-      | { kind: 'qrcode'; foX: number; foY: number; o: string; mag: number; ec?: string; data: string }
-      | { kind: 'gb'; foX: number; foY: number; wDots: number; hDots: number; tDots: number }
-      | { kind: 'gd'; foX: number; foY: number; wDots: number; hDots: number; tDots: number; o?: string }
+      | { kind: 'text'; foX: number; foY: number; fontCode: string; o: string; hDots: number; wDots: number; data: string; ascentRatio?: number; reverse: boolean }
+      | { kind: 'barcode'; foX: number; foY: number; type: BarcodeElement['barcodeType']; o: string; hDots: number; showText: boolean; narrowDots: number; ratio: number; data: string; reverse: boolean }
+      | { kind: 'qrcode'; foX: number; foY: number; o: string; mag: number; ec?: string; data: string; reverse: boolean }
+      | { kind: 'gb'; foX: number; foY: number; wDots: number; hDots: number; tDots: number; reverse: boolean }
+      | { kind: 'gd'; foX: number; foY: number; wDots: number; hDots: number; tDots: number; o?: string; reverse: boolean }
 
     const fields: FieldRecord[] = []
     let widthMm = 0
@@ -261,8 +266,10 @@ export class ZPLDriver implements LabelDriver {
 
     let currentFO: { xDots: number; yDots: number } | null = null
     let currentBy: { w: number; r: number; h: number } | null = null
+    let currentFont = { fontCode: 'A', hDots: 9, wDots: 5 }
+    let reverseNextField = false
     let pending:
-      | { kind: 'text'; fontCode: string; o: string; hDots: number; wDots: number }
+      | { kind: 'text'; fontCode: string; o: string; hDots: number; wDots: number; ascentRatio?: number }
       | { kind: 'barcode'; type: BarcodeElement['barcodeType']; o: string; hDots: number; showText: boolean }
       | { kind: 'qrcode'; o: string; mag: number; ec?: string }
       | { kind: 'gb'; wDots: number; hDots: number; tDots: number }
@@ -307,6 +314,32 @@ export class ZPLDriver implements LabelDriver {
         continue
       }
 
+      if (cmd === 'CF') {
+        const [fontRaw, heightRaw, widthRaw] = rest.split(',')
+        const fontCode = (fontRaw?.trim() || currentFont.fontCode).slice(0, 1)
+        const parsedHeight = parseInt(heightRaw, 10)
+        const hDots = Number.isFinite(parsedHeight) && parsedHeight > 0 ? parsedHeight : currentFont.hDots
+        const parsedWidth = parseInt(widthRaw, 10)
+        const bitmapFontWidths: Record<string, number> = {
+          A: 5 / 9, B: 7 / 11, C: 10 / 18, D: 10 / 18,
+          E: 15 / 28, F: 13 / 26, G: 40 / 60, H: 13 / 21
+        }
+        const defaultWidth = fontCode === '0'
+          ? hDots
+          : Math.round(hDots * (bitmapFontWidths[fontCode] ?? 1))
+        currentFont = {
+          fontCode,
+          hDots,
+          wDots: Number.isFinite(parsedWidth) && parsedWidth > 0 ? parsedWidth : defaultWidth
+        }
+        continue
+      }
+
+      if (cmd === 'FR') {
+        reverseNextField = true
+        continue
+      }
+
       if (cmd === 'FO') {
         const [x, y] = rest.split(',').map(v => parseInt(v, 10))
         currentFO = { xDots: Number.isFinite(x) ? x : 0, yDots: Number.isFinite(y) ? y : 0 }
@@ -324,14 +357,21 @@ export class ZPLDriver implements LabelDriver {
         const [o, hStr, wStr] = rest.split(',')
         const hDots = parseInt(hStr, 10)
         const wDots = parseInt(wStr, 10)
-        pending = { kind: 'text', fontCode, o: o || 'N', hDots: Number.isFinite(hDots) ? hDots : 20, wDots: Number.isFinite(wDots) ? wDots : 20 }
+        pending = {
+          kind: 'text',
+          fontCode,
+          o: o || 'N',
+          hDots: Number.isFinite(hDots) ? hDots : 20,
+          wDots: Number.isFinite(wDots) ? wDots : 20,
+          ascentRatio: 0.8
+        }
         continue
       }
 
       if (cmd === 'BC') {
         const [o, hStr, showText] = rest.split(',')
         const hDots = parseInt(hStr, 10)
-        pending = { kind: 'barcode', type: 'code128', o: o || 'N', hDots: Number.isFinite(hDots) ? hDots : (currentBy?.h || 10), showText: (showText || 'N').toUpperCase() === 'Y' }
+        pending = { kind: 'barcode', type: 'code128', o: o || 'N', hDots: Number.isFinite(hDots) ? hDots : (currentBy?.h || 10), showText: (showText || 'Y').toUpperCase() === 'Y' }
         continue
       }
       if (cmd === 'B3') {
@@ -391,6 +431,15 @@ export class ZPLDriver implements LabelDriver {
       }
 
       if (cmd === 'FD') {
+        if (!pending) {
+          pending = {
+            kind: 'text',
+            fontCode: currentFont.fontCode,
+            o: 'N',
+            hDots: currentFont.hDots,
+            wDots: currentFont.wDots
+          }
+        }
         pendingData = rest
         continue
       }
@@ -399,12 +448,14 @@ export class ZPLDriver implements LabelDriver {
         if (!currentFO || !pending) {
           pending = null
           pendingData = null
+          reverseNextField = false
           continue
         }
 
         if (pending.kind === 'text') {
           const contentStr = pendingData ?? ''
-          const approxWidthDots = Math.max(1, Math.round((contentStr.length || 1) * pending.wDots * 0.6))
+          const averageCharacterWidth = pending.fontCode === '0' ? 0.4 : 0.6
+          const approxWidthDots = Math.max(1, Math.round((contentStr.length || 1) * pending.wDots * averageCharacterWidth))
           updateMax(currentFO.xDots, currentFO.yDots, approxWidthDots, Math.max(1, pending.hDots))
           fields.push({
             kind: 'text',
@@ -414,7 +465,9 @@ export class ZPLDriver implements LabelDriver {
             o: pending.o,
             hDots: pending.hDots,
             wDots: pending.wDots,
-            data: contentStr
+            data: contentStr,
+            ascentRatio: pending.ascentRatio,
+            reverse: reverseNextField
           })
         } else if (pending.kind === 'barcode') {
           const data = pendingData ?? ''
@@ -439,7 +492,8 @@ export class ZPLDriver implements LabelDriver {
             showText: pending.showText,
             narrowDots: narrow,
             ratio,
-            data
+            data,
+            reverse: reverseNextField
           })
         } else if (pending.kind === 'qrcode') {
           const payload = (pendingData ?? '').replace(/^LA,/, '')
@@ -452,7 +506,8 @@ export class ZPLDriver implements LabelDriver {
             o: pending.o,
             mag: pending.mag,
             ec: pending.ec,
-            data: payload
+            data: payload,
+            reverse: reverseNextField
           })
         } else if (pending.kind === 'gb') {
           updateMax(currentFO.xDots, currentFO.yDots, Math.max(1, pending.wDots), Math.max(1, pending.hDots))
@@ -462,7 +517,8 @@ export class ZPLDriver implements LabelDriver {
             foY: currentFO.yDots,
             wDots: pending.wDots,
             hDots: pending.hDots,
-            tDots: pending.tDots
+            tDots: pending.tDots,
+            reverse: reverseNextField
           })
         } else if (pending.kind === 'gd') {
           updateMax(currentFO.xDots, currentFO.yDots, Math.max(1, pending.wDots), Math.max(1, pending.hDots))
@@ -473,12 +529,14 @@ export class ZPLDriver implements LabelDriver {
             wDots: pending.wDots,
             hDots: pending.hDots,
             tDots: pending.tDots,
-            o: pending.o
+            o: pending.o,
+            reverse: reverseNextField
           })
         }
 
         pending = null
         pendingData = null
+        reverseNextField = false
         continue
       }
     }
@@ -534,12 +592,18 @@ export class ZPLDriver implements LabelDriver {
 
     const dotsToMm = (dots: number) => dots / sourceDotsPerMm
 
-    const marginDots = Math.round(10 * sourceDotsPerMm)
+    const minFieldX = Math.min(...fields.map((field) => field.foX).filter((x) => x > 0))
+    const minFieldY = Math.min(...fields.map((field) => field.foY).filter((y) => y > 0))
+    const defaultMarginDots = Math.round(10 * sourceDotsPerMm)
+    const inferMargin = (firstFieldOffset: number) =>
+      Number.isFinite(firstFieldOffset) && firstFieldOffset <= 100
+        ? Math.round(firstFieldOffset)
+        : defaultMarginDots
     if (hasPW && pwDots !== null) widthMm = dotsToMm(pwDots)
     if (hasLL && llDots !== null) heightMm = dotsToMm(llDots)
 
-    if (!hasPW) widthMm = dotsToMm(Math.max(1, maxXDots + marginDots))
-    if (!hasLL) heightMm = dotsToMm(Math.max(1, maxYDots + marginDots))
+    if (!hasPW) widthMm = dotsToMm(Math.max(1, maxXDots + inferMargin(minFieldX)))
+    if (!hasLL) heightMm = dotsToMm(Math.max(1, maxYDots + inferMargin(minFieldY)))
 
     if (!Number.isFinite(widthMm) || widthMm <= 0) widthMm = 100
     if (!Number.isFinite(heightMm) || heightMm <= 0) heightMm = 150
@@ -559,8 +623,12 @@ export class ZPLDriver implements LabelDriver {
       const yDotsTop = Math.max(0, Math.round(field.foY))
 
       if (field.kind === 'text') {
-        const yBaselineDots = field.foY + estimateAscentDots(field.hDots)
         const fontCode = field.fontCode || '0'
+        // Large font-0 glyphs sit lower in browser metrics than in ZPL output.
+        const zplFieldOriginAscentRatio = field.ascentRatio ?? (fontCode === '0'
+          ? (field.hDots >= 100 ? 0.46 : 0.7)
+          : 0.5)
+        const yBaselineDots = field.foY + Math.round(field.hDots * zplFieldOriginAscentRatio)
 
         const textEl: TextElement = {
           id,
@@ -571,7 +639,9 @@ export class ZPLDriver implements LabelDriver {
           content: field.data,
           fontCode,
           width: Math.max(1, Math.round(field.wDots)),
-          height: Math.max(1, Math.round(field.hDots))
+          height: Math.max(1, Math.round(field.hDots)),
+          zplFieldOriginAscentRatio,
+          reverse: field.reverse
         }
         elements.push(textEl)
         continue
@@ -590,6 +660,7 @@ export class ZPLDriver implements LabelDriver {
           height: Math.max(1, Math.round(field.hDots)),
           ratio: Math.max(1, Math.round(field.ratio)),
           showText: field.showText,
+          reverse: field.reverse
         }
         elements.push(barEl)
         continue
@@ -604,7 +675,8 @@ export class ZPLDriver implements LabelDriver {
           rotation: zplToRotation(field.o),
           content: field.data,
           size: Math.max(1, Math.min(20, Math.round(field.mag))),
-          errorCorrection: (field.ec as any) || 'H'
+          errorCorrection: (field.ec as any) || 'H',
+          reverse: field.reverse
         }
         elements.push(qrEl)
         continue
@@ -615,8 +687,10 @@ export class ZPLDriver implements LabelDriver {
         const hDots = Math.max(1, Math.round(field.hDots))
         const tDots = Math.max(1, Math.round(field.tDots))
 
-        if (field.wDots <= field.tDots || field.hDots <= field.tDots) {
-          const isVertical = field.wDots <= field.tDots
+        const isThinVertical = field.wDots <= field.tDots && field.hDots > field.tDots
+        const isThinHorizontal = field.hDots <= field.tDots && field.wDots > field.tDots
+        if (isThinVertical || isThinHorizontal) {
+          const isVertical = isThinVertical
           const lineEl: LineElement = {
             id,
             type: 'line',
@@ -625,7 +699,8 @@ export class ZPLDriver implements LabelDriver {
             rotation: 0,
             x2: xDots + (isVertical ? 0 : wDots),
             y2: yDotsTop + (isVertical ? hDots : 0),
-            thickness: tDots
+            thickness: tDots,
+            reverse: field.reverse
           }
           elements.push(lineEl)
           continue
@@ -639,7 +714,9 @@ export class ZPLDriver implements LabelDriver {
           rotation: 0,
           width: wDots,
           height: hDots,
-          thickness: tDots
+          thickness: tDots,
+          filled: field.tDots >= Math.min(wDots, hDots),
+          reverse: field.reverse
         }
         elements.push(rectEl)
         continue
@@ -658,7 +735,8 @@ export class ZPLDriver implements LabelDriver {
           rotation: 0,
           x2: xDots + wDots,
           y2: yDotsTop + (orient === 'L' ? 0 : hDots),
-          thickness: Math.max(1, Math.round(field.tDots))
+          thickness: Math.max(1, Math.round(field.tDots)),
+          reverse: field.reverse
         }
         elements.push(lineEl)
       }

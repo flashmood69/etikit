@@ -10,6 +10,7 @@ export interface BaseElement {
   x: number;
   y: number;
   rotation: number;
+  reverse?: boolean;
 }
 
 export interface TextElement extends BaseElement {
@@ -18,6 +19,7 @@ export interface TextElement extends BaseElement {
   fontCode: string;
   width: number; // Magnification or scale
   height: number; // Magnification or scale
+  zplFieldOriginAscentRatio?: number;
 }
 
 export interface BarcodeElement extends BaseElement {
@@ -49,6 +51,7 @@ export interface RectangleElement extends BaseElement {
   width: number;
   height: number;
   thickness: number;
+  filled?: boolean;
 }
 
 export type LabelElement = TextElement | BarcodeElement | QRCodeElement | LineElement | RectangleElement;

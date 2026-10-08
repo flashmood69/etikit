@@ -1,10 +1,11 @@
-import { useState, useRef, useEffect } from 'react'
-import { Plus, Save, FileDown, Type, Barcode as BarcodeIcon, Square, Minus, Trash2, Move, Settings, ChevronDown, ChevronUp, QrCode, Upload, Undo2, Redo2, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical, LayoutGrid, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, MousePointer2 } from 'lucide-react'
+import { useState, useRef, useEffect, useMemo } from 'react'
+import { Plus, Save, FileDown, Type, Barcode as BarcodeIcon, Square, Minus, Trash2, Move, Settings, Code2, Copy, Check, AlertTriangle, ChevronDown, ChevronUp, QrCode, Upload, Undo2, Redo2, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical, LayoutGrid, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, MousePointer2 } from 'lucide-react'
 import Draggable from 'react-draggable'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 import Barcode from 'react-barcode'
 import { QRCodeSVG } from 'qrcode.react'
+import packageJson from '../package.json'
 import { LabelElement, ElementType, TextElement, BarcodeElement, QRCodeElement, LineElement, RectangleElement, LabelTemplate, PrintSettings, Protocol, FontMetadata, DEFAULT_DPI, EditorState } from './types'
 import { drivers } from './drivers'
 import * as LabelService from './services/label-service'
@@ -33,6 +34,7 @@ function App() {
   const [newLabelPresetId, setNewLabelPresetId] = useState(LabelService.DEFAULT_LABEL_SIZE_PRESET_ID);
   const [newProtocol, setNewProtocol] = useState<Protocol>('tpcl');
   const [newDpi, setNewDpi] = useState<number>(DEFAULT_DPI);
+  const [activeSidebarTab, setActiveSidebarTab] = useState<'properties' | 'preview'>('properties');
   const editorViewportRef = useRef<HTMLDivElement | null>(null);
 
   // Helper setters that push to history
@@ -763,7 +765,46 @@ function App() {
         </main>
 
         {/* Properties Sidebar */}
-        <aside className="w-80 border-l bg-white flex flex-col shadow-sm shrink-0">
+        <aside className="w-96 max-[1100px]:w-80 max-[850px]:w-72 border-l bg-white flex flex-col shadow-sm shrink-0">
+          <div className="grid grid-cols-2 border-b bg-slate-50/50 p-2">
+            <button
+              type="button"
+              onClick={() => setActiveSidebarTab('properties')}
+              aria-pressed={activeSidebarTab === 'properties'}
+              className={cn(
+                "flex items-center justify-center gap-2 rounded-md px-2 py-2 text-xs font-semibold transition-colors",
+                activeSidebarTab === 'properties' ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:bg-white/70"
+              )}
+            >
+              <Settings size={14} />
+              Properties
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveSidebarTab('preview')}
+              aria-pressed={activeSidebarTab === 'preview'}
+              className={cn(
+                "flex items-center justify-center gap-2 rounded-md px-2 py-2 text-xs font-semibold transition-colors",
+                activeSidebarTab === 'preview' ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:bg-white/70"
+              )}
+            >
+              <Code2 size={14} />
+              Code Preview
+            </button>
+          </div>
+          {activeSidebarTab === 'preview' ? (
+            <CodePreviewPanel
+              label={{
+                name: labelName,
+                width: labelSize.width,
+                height: labelSize.height,
+                elements,
+                printSettings,
+                protocol
+              }}
+            />
+          ) : (
+            <>
           <div className="p-4 border-b flex items-center justify-between bg-slate-50/50">
             <div className="flex items-center gap-2">
               <Settings size={14} className="text-slate-400" />
@@ -1103,6 +1144,8 @@ function App() {
               </PropertyGrid>
             </div>
           </div>
+            </>
+          )}
         </aside>
       </div>
       
@@ -1121,11 +1164,120 @@ function App() {
           <span>Elements: {elements.length}</span>
         </div>
         <div>
-          <span>Etikit v1.0.0</span>
+          <span>Etikit v{packageJson.version}</span>
         </div>
       </footer>
     </div>
   )
+}
+
+function CodePreviewPanel({ label }: { label: LabelTemplate }) {
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle');
+
+  const generated = useMemo(() => {
+    try {
+      return { file: LabelService.generateLabelFile(label), error: '' };
+    } catch (error) {
+      return {
+        file: null,
+        error: error instanceof Error ? error.message : 'Could not generate preview'
+      };
+    }
+  }, [label]);
+
+  const copyCode = async () => {
+    if (!generated.file) return;
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(generated.file.code);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = generated.file.code;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        const copied = document.execCommand('copy');
+        textarea.remove();
+        if (!copied) throw new Error('Clipboard copy was denied');
+      }
+      setCopyStatus('copied');
+    } catch {
+      setCopyStatus('error');
+    }
+    window.setTimeout(() => setCopyStatus('idle'), 2200);
+  };
+
+  const driver = drivers[label.protocol];
+  const highlightedCode = generated.file?.code
+    .split(/(\{[^{}]*\}|\^[A-Z][A-Z0-9]?)/g)
+    .map((part, index) => {
+      if (!part) return null;
+      const isCommand = part.startsWith('{') || /^\^[A-Z]/.test(part);
+      return isCommand
+        ? <span key={index} className="text-emerald-300">{part}</span>
+        : <span key={index}>{part}</span>;
+    });
+
+  return (
+    <section className="flex min-h-0 flex-1 flex-col p-3" aria-label="Code preview panel">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Current format</span>
+          <span className="rounded-full bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-700">
+            {label.protocol === 'zpl' ? 'ZPL · Zebra' : 'TPCL · Toshiba'}
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={copyCode}
+          disabled={!generated.file}
+          className="flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+        >
+          {copyStatus === 'copied' ? <Check size={12} className="text-green-600" /> : <Copy size={12} />}
+          {copyStatus === 'copied' ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+
+      <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400">
+        <span className="truncate font-mono">{label.name}{driver.supportedExtensions[0]}</span>
+        <span className="shrink-0">{generated.file?.bytes.length ?? 0} bytes</span>
+      </div>
+
+      <div className="mt-2 min-h-0 flex-1 overflow-auto rounded-lg bg-slate-950 p-3 shadow-inner">
+        {generated.error ? (
+          <div className="text-xs text-red-300">{generated.error}</div>
+        ) : (
+          <pre
+            aria-label={`${label.protocol.toUpperCase()} generated code`}
+            className="whitespace-pre font-mono text-[11px] leading-5 text-slate-100"
+          >
+            <code>{highlightedCode}</code>
+          </pre>
+        )}
+      </div>
+
+      {generated.file && (
+        <div className="mt-2 space-y-1">
+          <p className="text-[10px] text-slate-500">
+            Encoding: <span className="font-semibold text-slate-700">
+              {generated.file.encoding === 'UTF-8' ? 'UTF-8' : 'single-byte (TPCL export mapping)'}
+            </span>
+          </p>
+          {generated.file.replacedCharacters > 0 && (
+            <p role="status" className="flex items-start gap-1.5 text-[10px] leading-4 text-amber-700">
+              <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+              {generated.file.replacedCharacters} unsupported Unicode character(s) export as ? in TPCL.
+            </p>
+          )}
+          {copyStatus === 'error' && (
+            <p role="status" className="text-[10px] text-red-600">Clipboard access was blocked. Select and copy the code manually.</p>
+          )}
+        </div>
+      )}
+    </section>
+  );
 }
 
 function ToolButton({ title, icon, onClick }: { title: string, icon: React.ReactNode, onClick: () => void }) {
@@ -1312,6 +1464,7 @@ function DraggableElement({ element, zoom, protocol, printSettings, supportedFon
       <div 
         ref={nodeRef}
         className={cn("absolute cursor-move select-none group", isSelected && "z-50")}
+        style={{ mixBlendMode: element.reverse ? 'difference' : undefined }}
         onClick={(e) => {
           e.stopPropagation();
           onSelect(e);
@@ -1413,6 +1566,8 @@ function ElementRenderer({ element, zoom, protocol, printSettings, supportedFont
           <div 
             className="whitespace-pre"
             style={{ 
+              display: 'inline-block',
+              verticalAlign: 'top',
               fontSize: `${font.fontSizePx}px`,
               transform: `scale(${scaleX}, ${scaleY})`,
               transformOrigin: 'left top',
@@ -1420,7 +1575,7 @@ function ElementRenderer({ element, zoom, protocol, printSettings, supportedFont
               fontWeight: font.fontWeight,
               fontStyle: font.fontStyle,
               lineHeight: 1,
-              color: 'black',
+              color: textEl.reverse ? 'white' : 'black',
             }}
           >
             {(textEl.content && textEl.content.length > 0) ? textEl.content : '\u00A0'}
@@ -1444,7 +1599,8 @@ function ElementRenderer({ element, zoom, protocol, printSettings, supportedFont
               format={protocol === 'zpl' && barEl.barcodeType === 'code128' ? 'CODE128B' : undefined}
               width={baseModuleWidth}
               height={barHeightPx}
-              displayValue={false}
+              displayValue={barEl.showText === true}
+              lineColor={barEl.reverse ? 'white' : 'black'}
               margin={0}
               background="transparent"
             />
@@ -1461,6 +1617,7 @@ function ElementRenderer({ element, zoom, protocol, printSettings, supportedFont
               value={qrEl.content || ''}
               size={sizePx}
               level={(qrEl.errorCorrection || 'H') as 'L' | 'M' | 'Q' | 'H'}
+              fgColor={qrEl.reverse ? 'white' : 'black'}
               marginSize={0}
             />
           </div>
@@ -1484,7 +1641,7 @@ function ElementRenderer({ element, zoom, protocol, printSettings, supportedFont
               y1={y1}
               x2={x2}
               y2={y2}
-              stroke="black"
+              stroke={lineEl.reverse ? 'white' : 'black'}
               strokeWidth={thicknessPx}
               strokeLinecap="square"
             />
@@ -1502,7 +1659,8 @@ function ElementRenderer({ element, zoom, protocol, printSettings, supportedFont
             style={{ 
               width: `${w}px`, 
               height: `${h}px`, 
-              border: `${t}px solid black`,
+              border: rectEl.filled ? undefined : `${t}px solid ${rectEl.reverse ? 'white' : 'black'}`,
+              backgroundColor: rectEl.reverse ? 'white' : rectEl.filled ? 'black' : undefined,
               boxSizing: 'border-box'
             }} 
           />
@@ -1518,7 +1676,7 @@ function ElementRenderer({ element, zoom, protocol, printSettings, supportedFont
       style={{ 
         width: `${rotatedWidth}px`, 
         height: `${rotatedHeight}px`, 
-        position: 'relative'
+        position: 'relative',
       }}
     >
       <div style={{ 

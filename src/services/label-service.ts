@@ -227,7 +227,10 @@ export function getTextScales(textEl: TextElement, protocol: Protocol) {
     const widthDots = typeof textEl.width === 'number' && Number.isFinite(textEl.width) ? textEl.width : 0;
     const heightDots = typeof textEl.height === 'number' && Number.isFinite(textEl.height) ? textEl.height : 0;
     const fontWidthCorrection = textEl.fontCode === '0' ? ZPL_FONT_ZERO_WIDTH_SCALE : 1;
-    const scaleX = (widthDots > 0 && heightDots > 0 ? (widthDots / heightDots) : 1) * fontWidthCorrection;
+    const bitmapFontWidthCompensation = textEl.fontCode === '0' ? 1 : 1 / 0.6;
+    const scaleX = (widthDots > 0 && heightDots > 0 ? (widthDots / heightDots) : 1)
+      * fontWidthCorrection
+      * bitmapFontWidthCompensation;
     return { scaleX, scaleY: 1 };
   }
   const scaleX = normalizeTextScale(textEl.width || 10);
@@ -650,7 +653,14 @@ export function getElementSize(element: LabelElement, zoom: number, supportedFon
   return { width: 1, height: 1 };
 }
 
-export function exportLabel(label: LabelTemplate) {
+export type GeneratedLabelFile = {
+  code: string;
+  bytes: Uint8Array;
+  encoding: 'UTF-8' | 'single-byte';
+  replacedCharacters: number;
+};
+
+export function generateLabelFile(label: LabelTemplate): GeneratedLabelFile {
   const driver = drivers[label.protocol];
   if (!driver) {
     throw new Error(`Driver for ${label.protocol} not found`);
@@ -659,16 +669,37 @@ export function exportLabel(label: LabelTemplate) {
   const output = driver.generate(label);
   
   let bytes: Uint8Array;
+  let code: string;
+  let replacedCharacters = 0;
+  let encoding: GeneratedLabelFile['encoding'];
   if (label.protocol === 'tpcl') {
     bytes = new Uint8Array(output.length);
     for (let i = 0; i < output.length; i++) {
       const charCode = output.charCodeAt(i);
       bytes[i] = charCode <= 255 ? charCode : 63;
     }
+    for (const character of output) {
+      if ((character.codePointAt(0) ?? 0) > 255) replacedCharacters++;
+    }
+    const codeChunks: string[] = [];
+    const chunkSize = 0x8000;
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      codeChunks.push(String.fromCharCode(...bytes.subarray(offset, offset + chunkSize)));
+    }
+    code = codeChunks.join('');
+    encoding = 'single-byte';
   } else {
     bytes = new TextEncoder().encode(output);
+    code = new TextDecoder('utf-8').decode(bytes);
+    encoding = 'UTF-8';
   }
   
+  return { code, bytes, encoding, replacedCharacters };
+}
+
+export function exportLabel(label: LabelTemplate) {
+  const driver = drivers[label.protocol];
+  const { bytes } = generateLabelFile(label);
   const blob = new Blob([bytes as any], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

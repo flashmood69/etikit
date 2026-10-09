@@ -709,6 +709,29 @@ export function exportLabel(label: LabelTemplate) {
   URL.revokeObjectURL(url);
 }
 
+export function exportLabelBatch(labels: LabelTemplate[]) {
+  if (labels.length === 0) return;
+
+  const driver = drivers[labels[0].protocol];
+  const separator = labels[0].protocol === 'tpcl'
+    ? new Uint8Array([13, 10])
+    : new Uint8Array([10]);
+  const parts: BlobPart[] = [];
+
+  labels.forEach((label, index) => {
+    if (index > 0) parts.push(separator as any);
+    parts.push(generateLabelFile(label).bytes as any);
+  });
+
+  const blob = new Blob(parts, { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${labels[0].name}-batch${driver.supportedExtensions[0]}`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export function saveTemplate(label: LabelTemplate) {
   const json = JSON.stringify(label, null, 2);
   const blob = new Blob([json], { type: 'application/json' });

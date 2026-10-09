@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { Plus, Save, FileDown, Type, Barcode as BarcodeIcon, Square, Minus, Trash2, Move, Settings, Code2, Copy, Check, AlertTriangle, ChevronDown, ChevronUp, QrCode, Upload, Undo2, Redo2, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical, LayoutGrid, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, MousePointer2 } from 'lucide-react'
+import { Plus, Save, FileDown, Type, Barcode as BarcodeIcon, Square, Minus, Trash2, Move, Settings, Code2, Copy, ClipboardPaste, Scissors, Check, AlertTriangle, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, QrCode, Upload, Undo2, Redo2, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical, LayoutGrid, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, MousePointer2 } from 'lucide-react'
 import Draggable from 'react-draggable'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
@@ -9,10 +9,30 @@ import packageJson from '../package.json'
 import { LabelElement, ElementType, TextElement, BarcodeElement, QRCodeElement, LineElement, RectangleElement, LabelTemplate, PrintSettings, Protocol, FontMetadata, DEFAULT_DPI, EditorState } from './types'
 import { drivers } from './drivers'
 import * as LabelService from './services/label-service'
+import { CsvDataset, hasCsvBindings, parseCsv, resolveCsvFields } from './services/csv-service'
 import { useHistory } from './hooks/useHistory'
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
+}
+
+function offsetElement(element: LabelElement, offset: number, id = element.id): LabelElement {
+  if (element.type === 'line') {
+    return {
+      ...element,
+      id,
+      x: element.x + offset,
+      y: element.y + offset,
+      x2: element.x2 + offset,
+      y2: element.y2 + offset
+    };
+  }
+  return {
+    ...element,
+    id,
+    x: element.x + offset,
+    y: element.y + offset
+  };
 }
 
 function App() {
@@ -34,7 +54,12 @@ function App() {
   const [newLabelPresetId, setNewLabelPresetId] = useState(LabelService.DEFAULT_LABEL_SIZE_PRESET_ID);
   const [newProtocol, setNewProtocol] = useState<Protocol>('tpcl');
   const [newDpi, setNewDpi] = useState<number>(DEFAULT_DPI);
-  const [activeSidebarTab, setActiveSidebarTab] = useState<'properties' | 'preview'>('properties');
+  const [activeSidebarTab, setActiveSidebarTab] = useState<'properties' | 'preview' | 'batch'>('properties');
+  const [csvDataset, setCsvDataset] = useState<CsvDataset | null>(null);
+  const [csvRecordIndex, setCsvRecordIndex] = useState(0);
+  const [csvError, setCsvError] = useState('');
+  const [clipboardElements, setClipboardElements] = useState<LabelElement[]>([]);
+  const [pasteCount, setPasteCount] = useState(0);
   const editorViewportRef = useRef<HTMLDivElement | null>(null);
 
   // Helper setters that push to history
@@ -71,16 +96,25 @@ function App() {
   const selectedElements = elements.filter(el => selectedIds.includes(el.id));
   const selectedElement = selectedElements.length === 1 ? selectedElements[0] : null;
   const currentDriver = drivers[protocol];
+  const activeCsvRow = csvDataset?.rows[csvRecordIndex];
+  const displayElements = useMemo(
+    () => resolveCsvFields(elements, activeCsvRow),
+    [elements, activeCsvRow]
+  );
+  const canExportBatch = Boolean(csvDataset && hasCsvBindings(elements, csvDataset.headers));
 
   const addElement = (type: ElementType) => {
     try {
-      const newElement = LabelService.createDefaultElement(
+      const defaultElement = LabelService.createDefaultElement(
         type, 
         protocol, 
         printSettings, 
         currentDriver.supportedFonts, 
         currentDriver.supportedBarcodes
       );
+      const sameTypeCount = elements.filter((element) => element.type === type).length;
+      const offset = LabelService.mmToUnits(2 * sameTypeCount, protocol, printSettings);
+      const newElement = offsetElement(defaultElement, offset);
       pushState({
         ...state,
         elements: [...elements, newElement],
@@ -99,6 +133,12 @@ function App() {
     pushState({ ...state, elements: nextElements });
   };
 
+  const appendCsvField = (element: TextElement | BarcodeElement | QRCodeElement, field: string) => {
+    const content = element.content ?? '';
+    const separator = element.type === 'text' && content && !/\s$/.test(content) ? ' ' : '';
+    updateElement(element.id, { content: `${content}${separator}{{${field}}}` });
+  };
+
   const deleteElement = (id: string) => {
     const nextElements = elements.filter(el => el.id !== id);
     const nextSelectedIds = selectedIds.filter(selectedId => selectedId !== id);
@@ -107,6 +147,46 @@ function App() {
       elements: nextElements,
       selectedIds: nextSelectedIds
     });
+  };
+
+  const copySelected = () => {
+    if (selectedElements.length === 0) return;
+    setClipboardElements(selectedElements.map((element) => ({ ...element })));
+    setPasteCount(0);
+  };
+
+  const cutSelected = () => {
+    if (selectedElements.length === 0) return;
+    setClipboardElements(selectedElements.map((element) => ({ ...element })));
+    setPasteCount(0);
+    const selected = new Set(selectedIds);
+    pushState({
+      ...state,
+      elements: elements.filter((element) => !selected.has(element.id)),
+      selectedIds: []
+    });
+  };
+
+  const pasteCopied = () => {
+    if (clipboardElements.length === 0) return;
+    const offset = LabelService.mmToUnits(2 * (pasteCount + 1), protocol, printSettings);
+    const usedIds = new Set(elements.map((element) => element.id));
+    const createId = () => {
+      let id = '';
+      do {
+        id = Math.random().toString(36).substring(2, 11);
+      } while (usedIds.has(id));
+      usedIds.add(id);
+      return id;
+    };
+
+    const pastedElements = clipboardElements.map((element) => offsetElement(element, offset, createId()));
+    pushState({
+      ...state,
+      elements: [...elements, ...pastedElements],
+      selectedIds: pastedElements.map((element) => element.id)
+    });
+    setPasteCount((count) => count + 1);
   };
 
   const handleDrag = (id: string, data: { x: number, y: number }) => {
@@ -375,11 +455,35 @@ function App() {
       name: labelName,
       width: labelSize.width,
       height: labelSize.height,
-      elements,
+      elements: displayElements,
       printSettings,
       protocol
     };
     LabelService.exportLabel(template);
+  };
+
+  const exportBatch = () => {
+    if (!csvDataset || !canExportBatch) return;
+    const labels = csvDataset.rows.map((row): LabelTemplate => ({
+      name: labelName,
+      width: labelSize.width,
+      height: labelSize.height,
+      elements: resolveCsvFields(elements, row),
+      printSettings,
+      protocol
+    }));
+    LabelService.exportLabelBatch(labels);
+  };
+
+  const importCsv = async (file: File) => {
+    try {
+      const dataset = parseCsv(await file.text(), file.name);
+      setCsvDataset(dataset);
+      setCsvRecordIndex(0);
+      setCsvError('');
+    } catch (error) {
+      setCsvError(error instanceof Error ? error.message : 'Could not read this CSV file.');
+    }
   };
 
   const saveTemplate = () => {
@@ -401,6 +505,9 @@ function App() {
     try {
       const result = await LabelService.loadTemplate(file);
       if (result) {
+        setCsvDataset(null);
+        setCsvRecordIndex(0);
+        setCsvError('');
         resetState({
           elements: result.elements,
           labelSize: { width: result.width, height: result.height },
@@ -423,6 +530,9 @@ function App() {
 
   const resetToNew = (size?: { width: number; height: number }, newProtocol?: Protocol, dpi?: number) => {
     const nextSize = size ?? { width: 102, height: 76 }
+    setCsvDataset(null);
+    setCsvRecordIndex(0);
+    setCsvError('');
     resetState({
       elements: [],
       selectedIds: [],
@@ -455,22 +565,34 @@ function App() {
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey) {
-        if (e.key === 'z') {
-          if (e.shiftKey) {
-            redo();
-          } else {
-            undo();
-          }
-        } else if (e.key === 'y') {
+      if (!(e.ctrlKey || e.metaKey) || e.repeat) return;
+      const key = e.key.toLowerCase();
+      const target = e.target as HTMLElement | null;
+      const isEditingText = Boolean(target?.closest('input, textarea, select, [contenteditable="true"]'));
+
+      if (!isEditingText && key === 'c' && selectedIds.length > 0) {
+        e.preventDefault();
+        copySelected();
+      } else if (!isEditingText && key === 'x' && selectedIds.length > 0) {
+        e.preventDefault();
+        cutSelected();
+      } else if (!isEditingText && key === 'v' && clipboardElements.length > 0) {
+        e.preventDefault();
+        pasteCopied();
+      } else if (key === 'z') {
+        if (e.shiftKey) {
           redo();
+        } else {
+          undo();
         }
+      } else if (key === 'y') {
+        redo();
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [undo, redo]);
+  }, [selectedIds, clipboardElements, copySelected, cutSelected, pasteCopied, undo, redo]);
 
   return (
     <div className="flex h-screen w-full flex-col bg-slate-50 text-slate-900 overflow-hidden font-sans">
@@ -535,6 +657,39 @@ function App() {
             </button>
           </div>
 
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={cutSelected}
+              disabled={selectedIds.length === 0}
+              aria-label="Cut selected"
+              title="Cut (Ctrl+X)"
+              className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+            >
+              <Scissors size={17} />
+            </button>
+            <button
+              type="button"
+              onClick={copySelected}
+              disabled={selectedIds.length === 0}
+              aria-label="Copy selected"
+              title="Copy (Ctrl+C)"
+              className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+            >
+              <Copy size={17} />
+            </button>
+            <button
+              type="button"
+              onClick={pasteCopied}
+              disabled={clipboardElements.length === 0}
+              aria-label="Paste copied objects"
+              title="Paste (Ctrl+V)"
+              className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+            >
+              <ClipboardPaste size={17} />
+            </button>
+          </div>
+
           <div className="h-6 w-[1px] bg-slate-200 mx-1" />
 
           <div className="flex items-center gap-1">
@@ -578,13 +733,6 @@ function App() {
                 <button onClick={() => distributeElements('vertical')} className="p-1.5 rounded-lg hover:bg-white hover:shadow-sm text-slate-600 transition-all active:scale-90" title="Distribute Vertically"><AlignVerticalDistributeCenter size={16} /></button>
               </>
             )}
-          </div>
-
-          <div className="flex items-center gap-2 ml-1">
-            <button onClick={exportLabel} className="flex items-center gap-2 rounded-md bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 shadow-sm transition-all active:scale-95 group">
-              <FileDown size={16} />
-              <span className="hidden lg:inline">Export</span>
-            </button>
           </div>
         </div>
       </header>
@@ -734,7 +882,7 @@ function App() {
                 />
               )}
 
-              {elements.map((el) => (
+              {displayElements.map((el) => (
                 <DraggableElement 
                   key={el.id} 
                   element={el} 
@@ -766,41 +914,74 @@ function App() {
 
         {/* Properties Sidebar */}
         <aside className="w-96 max-[1100px]:w-80 max-[850px]:w-72 border-l bg-white flex flex-col shadow-sm shrink-0">
-          <div className="grid grid-cols-2 border-b bg-slate-50/50 p-2">
+          <div className="grid grid-cols-3 border-b bg-slate-50/50 p-2">
             <button
               type="button"
               onClick={() => setActiveSidebarTab('properties')}
               aria-pressed={activeSidebarTab === 'properties'}
+              title="Properties"
               className={cn(
-                "flex items-center justify-center gap-2 rounded-md px-2 py-2 text-xs font-semibold transition-colors",
+                "flex items-center justify-center gap-1 rounded-md px-1 py-2 text-[10px] font-semibold transition-colors",
                 activeSidebarTab === 'properties' ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:bg-white/70"
               )}
             >
-              <Settings size={14} />
+              <Settings size={13} />
               Properties
             </button>
             <button
               type="button"
               onClick={() => setActiveSidebarTab('preview')}
               aria-pressed={activeSidebarTab === 'preview'}
+              title="Generated Code"
               className={cn(
-                "flex items-center justify-center gap-2 rounded-md px-2 py-2 text-xs font-semibold transition-colors",
+                "flex items-center justify-center gap-1 rounded-md px-1 py-2 text-[10px] font-semibold transition-colors",
                 activeSidebarTab === 'preview' ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:bg-white/70"
               )}
             >
-              <Code2 size={14} />
-              Code Preview
+              <Code2 size={13} />
+              Code
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveSidebarTab('batch')}
+              aria-pressed={activeSidebarTab === 'batch'}
+              title="Batch Data"
+              className={cn(
+                "flex items-center justify-center gap-1 rounded-md px-1 py-2 text-[10px] font-semibold transition-colors",
+                activeSidebarTab === 'batch' ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:bg-white/70"
+              )}
+            >
+              <Upload size={13} />
+              Data
             </button>
           </div>
           {activeSidebarTab === 'preview' ? (
             <CodePreviewPanel
+              onExport={exportLabel}
+              selectedIds={selectedIds}
+              recordInfo={csvDataset ? { index: csvRecordIndex, total: csvDataset.rows.length } : undefined}
               label={{
                 name: labelName,
                 width: labelSize.width,
                 height: labelSize.height,
-                elements,
+                elements: displayElements,
                 printSettings,
                 protocol
+              }}
+            />
+          ) : activeSidebarTab === 'batch' ? (
+            <BatchDataPanel
+              dataset={csvDataset}
+              recordIndex={csvRecordIndex}
+              error={csvError}
+              canExportBatch={canExportBatch}
+              onImport={importCsv}
+              onRecordChange={setCsvRecordIndex}
+              onExportBatch={exportBatch}
+              onClear={() => {
+                setCsvDataset(null);
+                setCsvRecordIndex(0);
+                setCsvError('');
               }}
             />
           ) : (
@@ -849,6 +1030,12 @@ function App() {
                       value={(selectedElement as TextElement).content}
                       onChange={(e) => updateElement(selectedElement.id, { content: e.target.value })}
                     />
+                    {csvDataset && (
+                      <CsvFieldPicker
+                        headers={csvDataset.headers}
+                        onInsert={(field) => appendCsvField(selectedElement as TextElement, field)}
+                      />
+                    )}
                   </div>
                 )}
 
@@ -863,6 +1050,12 @@ function App() {
                       value={(selectedElement as BarcodeElement | QRCodeElement).content}
                       onChange={(e) => updateElement(selectedElement.id, { content: e.target.value })}
                     />
+                    {csvDataset && (
+                      <CsvFieldPicker
+                        headers={csvDataset.headers}
+                        onInsert={(field) => appendCsvField(selectedElement as BarcodeElement | QRCodeElement, field)}
+                      />
+                    )}
                   </div>
                 )}
 
@@ -1171,7 +1364,257 @@ function App() {
   )
 }
 
-function CodePreviewPanel({ label }: { label: LabelTemplate }) {
+function CsvFieldPicker({ headers, onInsert }: { headers: string[], onInsert: (field: string) => void }) {
+  const [field, setField] = useState('');
+
+  return (
+    <div className="space-y-1">
+      <label className="text-[10px] font-semibold text-blue-600">Insert CSV field</label>
+      <select
+        value={field}
+        onChange={(event) => {
+          const nextField = event.target.value;
+          setField('');
+          if (nextField) onInsert(nextField);
+        }}
+        className="w-full rounded-md border border-blue-200 bg-blue-50 px-2 py-1.5 text-xs text-blue-800 outline-none focus:ring-2 focus:ring-blue-500/20"
+      >
+        <option value="">Choose a column...</option>
+        {headers.map((header) => <option key={header} value={header}>{header}</option>)}
+      </select>
+    </div>
+  );
+}
+
+function BatchDataPanel({
+  dataset,
+  recordIndex,
+  error,
+  canExportBatch,
+  onImport,
+  onRecordChange,
+  onExportBatch,
+  onClear
+}: {
+  dataset: CsvDataset | null,
+  recordIndex: number,
+  error: string,
+  canExportBatch: boolean,
+  onImport: (file: File) => Promise<void>,
+  onRecordChange: (index: number) => void,
+  onExportBatch: () => void,
+  onClear: () => void
+}) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  return (
+    <section className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4" aria-label="CSV batch data">
+      <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-4">
+        <div>
+          <h2 className="text-xs font-bold text-slate-700">CSV Batch</h2>
+          <p className="mt-1 text-[10px] leading-4 text-slate-500">
+            Preview records on the label and export them as one print file.
+          </p>
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".csv,text/csv"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) void onImport(file);
+            event.target.value = '';
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          className="flex shrink-0 items-center gap-1.5 rounded-md bg-blue-600 px-2.5 py-2 text-[10px] font-semibold text-white hover:bg-blue-700"
+        >
+          <Upload size={13} />
+          {dataset ? 'Replace CSV' : 'Import CSV'}
+        </button>
+      </div>
+
+      <p className="mt-3 rounded-md bg-slate-50 p-2.5 text-[10px] leading-4 text-slate-600">
+        In Text, Barcode, or QR content, use <code className="font-semibold text-slate-800">{'{{Column Name}}'}</code>.
+        Import a CSV, then insert fields from Properties.
+      </p>
+
+      {error && (
+        <p role="alert" className="mt-3 rounded-md border border-red-200 bg-red-50 p-2.5 text-[10px] leading-4 text-red-700">
+          {error}
+        </p>
+      )}
+
+      {dataset ? (
+        <div className="mt-4 space-y-4">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate text-xs font-semibold text-slate-700">{dataset.fileName}</p>
+              <p className="mt-0.5 text-[10px] text-slate-500">
+                {dataset.rows.length} records · {dataset.headers.length} columns
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onClear}
+              className="shrink-0 rounded px-2 py-1 text-[10px] font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+            >
+              Clear
+            </button>
+          </div>
+
+          <div className="rounded-lg border border-slate-200 p-3">
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Active record</span>
+              <span className="font-mono text-xs font-bold text-slate-700">
+                {recordIndex + 1} / {dataset.rows.length}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                aria-label="Previous CSV record"
+                disabled={recordIndex === 0}
+                onClick={() => onRecordChange(recordIndex - 1)}
+                className="rounded-md border border-slate-200 p-2 text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <ChevronLeft size={15} />
+              </button>
+              <div className="min-w-0 flex-1 truncate rounded-md bg-slate-50 px-3 py-2 text-center text-[10px] text-slate-600">
+                {dataset.headers.slice(0, 2).map((header) => `${header}: ${dataset.rows[recordIndex][header]}`).join(' · ')}
+              </div>
+              <button
+                type="button"
+                aria-label="Next CSV record"
+                disabled={recordIndex >= dataset.rows.length - 1}
+                onClick={() => onRecordChange(recordIndex + 1)}
+                className="rounded-md border border-slate-200 p-2 text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <ChevronRight size={15} />
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">CSV fields</p>
+            <div className="flex flex-wrap gap-1.5">
+              {dataset.headers.map((header) => (
+                <span key={header} className="rounded bg-blue-50 px-2 py-1 font-mono text-[10px] text-blue-700">
+                  {header}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onExportBatch}
+            disabled={!canExportBatch}
+            className="flex w-full items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            <FileDown size={14} />
+            Download Batch ({dataset.rows.length})
+          </button>
+          {!canExportBatch && (
+            <p className="text-[10px] leading-4 text-slate-500">
+              Insert a CSV field into Text, Barcode, or QR content to enable batch export.
+            </p>
+          )}
+        </div>
+      ) : (
+        <div className="mt-6 rounded-lg border border-dashed border-slate-200 p-4 text-center">
+          <p className="text-xs font-semibold text-slate-600">No CSV loaded</p>
+          <p className="mt-1 text-[10px] leading-4 text-slate-500">
+            Your label can use placeholders before or after importing a data file.
+          </p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function getSelectedCodeLines(code: string, label: LabelTemplate, selectedIds: string[]) {
+  const lines = code.split(/\r\n|\n/);
+  const selected = new Set(selectedIds);
+  const selectedLines = new Set<number>();
+  if (selected.size === 0) return selectedLines;
+
+  if (label.protocol === 'zpl') {
+    const elementsByMarker = new Map(
+      label.elements.map((element) => [`^FX Element: ${element.type} (${element.id})`, element.id])
+    );
+    let currentElementId: string | undefined;
+    let groupStart = -1;
+    const addGroup = (end: number) => {
+      if (!currentElementId || !selected.has(currentElementId)) return;
+      for (let lineIndex = groupStart; lineIndex < end; lineIndex++) selectedLines.add(lineIndex);
+    };
+
+    lines.forEach((line, lineIndex) => {
+      if (!line.startsWith('^FX Element:')) return;
+      addGroup(lineIndex);
+      currentElementId = elementsByMarker.get(line);
+      groupStart = lineIndex;
+    });
+    addGroup(lines.length);
+    return selectedLines;
+  }
+
+  const lineIndicesByCommand = new Map<string, number>();
+  const graphicLineIndices: number[] = [];
+  lines.forEach((line, lineIndex) => {
+    const command = line.match(/^\{(PC\d+|RC\d+|XB\d+|RB\d+);/)?.[1];
+    if (command) lineIndicesByCommand.set(command, lineIndex);
+    if (/^\{(?:LC|XR);/.test(line)) graphicLineIndices.push(lineIndex);
+  });
+
+  const addCommand = (command: string) => {
+    const lineIndex = lineIndicesByCommand.get(command);
+    if (lineIndex !== undefined) selectedLines.add(lineIndex);
+  };
+  let textCounter = 1;
+  let barcodeCounter = 0;
+  let graphicCounter = 0;
+
+  label.elements.forEach((element) => {
+    if (element.type === 'text') {
+      const commandIndex = textCounter++;
+      if (selected.has(element.id)) {
+        const suffix = commandIndex.toString().padStart(3, '0');
+        addCommand(`PC${suffix}`);
+        if (Object.prototype.hasOwnProperty.call(element, 'content')) addCommand(`RC${suffix}`);
+      }
+      return;
+    }
+
+    if (element.type === 'barcode' || element.type === 'qrcode') {
+      const commandIndex = barcodeCounter++;
+      if (selected.has(element.id)) {
+        const suffix = commandIndex.toString().padStart(2, '0');
+        addCommand(`XB${suffix}`);
+        addCommand(`RB${suffix}`);
+      }
+      return;
+    }
+
+    const graphicLineIndex = graphicLineIndices[graphicCounter++];
+    if (selected.has(element.id) && graphicLineIndex !== undefined) {
+      selectedLines.add(graphicLineIndex);
+    }
+  });
+
+  return selectedLines;
+}
+
+function CodePreviewPanel({ label, onExport, selectedIds, recordInfo }: {
+  label: LabelTemplate,
+  onExport: () => void,
+  selectedIds: string[],
+  recordInfo?: { index: number, total: number }
+}) {
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle');
 
   const generated = useMemo(() => {
@@ -1184,6 +1627,11 @@ function CodePreviewPanel({ label }: { label: LabelTemplate }) {
       };
     }
   }, [label]);
+  const codeLines = generated.file?.code.split(/\r\n|\n/) ?? [];
+  const selectedCodeLines = useMemo(
+    () => generated.file ? getSelectedCodeLines(generated.file.code, label, selectedIds) : new Set<number>(),
+    [generated.file, label, selectedIds]
+  );
 
   const copyCode = async () => {
     if (!generated.file) return;
@@ -1210,39 +1658,62 @@ function CodePreviewPanel({ label }: { label: LabelTemplate }) {
   };
 
   const driver = drivers[label.protocol];
-  const highlightedCode = generated.file?.code
-    .split(/(\{[^{}]*\}|\^[A-Z][A-Z0-9]?)/g)
-    .map((part, index) => {
+  const highlightedCode = codeLines.map((line, lineIndex) => {
+    const parts = line.split(/(\{[^{}]*\}|\^[A-Z][A-Z0-9]?)/g).map((part, partIndex) => {
       if (!part) return null;
       const isCommand = part.startsWith('{') || /^\^[A-Z]/.test(part);
       return isCommand
-        ? <span key={index} className="text-emerald-300">{part}</span>
-        : <span key={index}>{part}</span>;
+        ? <span key={partIndex} className="text-emerald-300">{part}</span>
+        : <span key={partIndex}>{part}</span>;
     });
+    const isSelected = selectedCodeLines.has(lineIndex);
+    return (
+      <span
+        key={lineIndex}
+        className={`block ${isSelected ? '-mx-3 bg-amber-400/20 px-3' : ''}`}
+      >
+        {parts}
+      </span>
+    );
+  });
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col p-3" aria-label="Code preview panel">
+    <section className="flex min-h-0 flex-1 flex-col p-3" aria-label="Generated code panel">
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Current format</span>
+        <div className="min-w-0">
           <span className="rounded-full bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-700">
             {label.protocol === 'zpl' ? 'ZPL · Zebra' : 'TPCL · Toshiba'}
           </span>
         </div>
-        <button
-          type="button"
-          onClick={copyCode}
-          disabled={!generated.file}
-          className="flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-        >
-          {copyStatus === 'copied' ? <Check size={12} className="text-green-600" /> : <Copy size={12} />}
-          {copyStatus === 'copied' ? 'Copied' : 'Copy'}
-        </button>
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            onClick={copyCode}
+            disabled={!generated.file}
+            className="flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+          >
+            {copyStatus === 'copied' ? <Check size={12} className="text-green-600" /> : <Copy size={12} />}
+            {copyStatus === 'copied' ? 'Copied' : 'Copy'}
+          </button>
+          <button
+            type="button"
+            onClick={onExport}
+            disabled={!generated.file}
+            aria-label={`Download ${label.protocol.toUpperCase()} file`}
+            className="flex items-center gap-1 rounded-md bg-blue-600 px-2 py-1.5 text-[10px] font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            <FileDown size={12} />
+            Download {label.protocol.toUpperCase()}
+          </button>
+        </div>
       </div>
 
       <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400">
         <span className="truncate font-mono">{label.name}{driver.supportedExtensions[0]}</span>
-        <span className="shrink-0">{generated.file?.bytes.length ?? 0} bytes</span>
+        <span className="shrink-0">
+          {recordInfo ? `Row ${recordInfo.index + 1}/${recordInfo.total} · ` : ''}
+          {generated.file?.bytes.length ?? 0} bytes
+        </span>
       </div>
 
       <div className="mt-2 min-h-0 flex-1 overflow-auto rounded-lg bg-slate-950 p-3 shadow-inner">

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { Plus, Save, FileDown, Type, Barcode as BarcodeIcon, Square, Minus, Trash2, Move, Settings, Code2, Copy, ClipboardPaste, Scissors, Check, AlertTriangle, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, QrCode, Upload, Undo2, Redo2, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical, LayoutGrid, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, MousePointer2 } from 'lucide-react'
+import { Plus, Save, FileDown, Type, Barcode as BarcodeIcon, Square, Minus, Trash2, Move, Settings, Code2, Copy, ClipboardPaste, Scissors, Check, AlertTriangle, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, QrCode, Upload, Undo2, Redo2, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical, Expand, LayoutGrid, Grid3x3, Magnet, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, MousePointer2 } from 'lucide-react'
 import Draggable from 'react-draggable'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
@@ -35,6 +35,99 @@ function offsetElement(element: LabelElement, offset: number, id = element.id): 
   };
 }
 
+const LOCAL_DRAFT_KEY = 'etikit:local-draft:v1';
+
+type DraftRecoveryState =
+  | { status: 'checking' | 'ready' }
+  | { status: 'pending'; draft: EditorState };
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isSavedElement(value: unknown): value is LabelElement {
+  if (!value || typeof value !== 'object') return false;
+  const element = value as Record<string, unknown>;
+  if (
+    typeof element.id !== 'string' ||
+    !isFiniteNumber(element.x) ||
+    !isFiniteNumber(element.y) ||
+    !isFiniteNumber(element.rotation)
+  ) return false;
+
+  switch (element.type) {
+    case 'text':
+      return typeof element.fontCode === 'string' &&
+        (element.content === undefined || typeof element.content === 'string') &&
+        isFiniteNumber(element.width) &&
+        isFiniteNumber(element.height);
+    case 'barcode':
+      return typeof element.barcodeType === 'string' &&
+        (element.content === undefined || typeof element.content === 'string') &&
+        isFiniteNumber(element.width) &&
+        isFiniteNumber(element.height);
+    case 'qrcode':
+      return (element.content === undefined || typeof element.content === 'string') && isFiniteNumber(element.size);
+    case 'line':
+      return isFiniteNumber(element.x2) && isFiniteNumber(element.y2) && isFiniteNumber(element.thickness);
+    case 'rectangle':
+      return isFiniteNumber(element.width) && isFiniteNumber(element.height) && isFiniteNumber(element.thickness);
+    default:
+      return false;
+  }
+}
+
+function parseSavedDraft(rawDraft: string | null): EditorState | null {
+  if (!rawDraft) return null;
+
+  try {
+    const value = JSON.parse(rawDraft) as Record<string, unknown>;
+    const size = value.labelSize as Record<string, unknown> | null;
+    const print = value.printSettings as Record<string, unknown> | null;
+    const grid = value.gridSettings as Record<string, unknown> | null;
+    if (
+      typeof value.name !== 'string' ||
+      !Array.isArray(value.elements) ||
+      !value.elements.every(isSavedElement) ||
+      !size ||
+      !isFiniteNumber(size.width) ||
+      size.width <= 0 ||
+      !isFiniteNumber(size.height) ||
+      size.height <= 0 ||
+      !print ||
+      !isFiniteNumber(print.quantity) ||
+      (print.speed !== undefined && !isFiniteNumber(print.speed)) ||
+      (print.darkness !== undefined && !isFiniteNumber(print.darkness)) ||
+      (print.dpi !== undefined && !isFiniteNumber(print.dpi)) ||
+      !grid ||
+      typeof grid.enabled !== 'boolean' ||
+      typeof grid.visible !== 'boolean' ||
+      !isFiniteNumber(grid.size) ||
+      grid.size <= 0 ||
+      (value.protocol !== 'tpcl' && value.protocol !== 'zpl')
+    ) return null;
+
+    return { ...value, selectedIds: [] } as unknown as EditorState;
+  } catch {
+    return null;
+  }
+}
+
+function hasRecoverableContent(draft: EditorState): boolean {
+  return draft.elements.length > 0 ||
+    draft.name !== 'Untitled' ||
+    draft.labelSize.width !== 102 ||
+    draft.labelSize.height !== 76 ||
+    draft.protocol !== 'tpcl' ||
+    draft.printSettings.quantity !== 1 ||
+    (draft.printSettings.speed ?? 3) !== 3 ||
+    (draft.printSettings.darkness ?? 10) !== 10 ||
+    (draft.printSettings.dpi ?? DEFAULT_DPI) !== DEFAULT_DPI ||
+    draft.gridSettings.enabled ||
+    draft.gridSettings.visible ||
+    draft.gridSettings.size !== 2;
+}
+
 function App() {
   const { state, pushState, undo, redo, canUndo, canRedo, resetState, replaceState } = useHistory({
     elements: [],
@@ -51,16 +144,45 @@ function App() {
   const [zoom, setZoom] = useState(4); // 1mm = 4px
   const [isAutoZoom, setIsAutoZoom] = useState(false);
   const [isNewConfirmOpen, setIsNewConfirmOpen] = useState(false);
+  const [newLabelName, setNewLabelName] = useState('Untitled');
   const [newLabelPresetId, setNewLabelPresetId] = useState(LabelService.DEFAULT_LABEL_SIZE_PRESET_ID);
   const [newProtocol, setNewProtocol] = useState<Protocol>('tpcl');
   const [newDpi, setNewDpi] = useState<number>(DEFAULT_DPI);
-  const [activeSidebarTab, setActiveSidebarTab] = useState<'properties' | 'preview' | 'batch'>('properties');
+  const [activeSidebarTab, setActiveSidebarTab] = useState<'properties' | 'preview' | 'batch' | 'settings'>('properties');
+  const [draftRecovery, setDraftRecovery] = useState<DraftRecoveryState>({ status: 'checking' });
   const [csvDataset, setCsvDataset] = useState<CsvDataset | null>(null);
   const [csvRecordIndex, setCsvRecordIndex] = useState(0);
   const [csvError, setCsvError] = useState('');
   const [clipboardElements, setClipboardElements] = useState<LabelElement[]>([]);
   const [pasteCount, setPasteCount] = useState(0);
   const editorViewportRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    let draft: EditorState | null = null;
+    try {
+      draft = parseSavedDraft(window.localStorage.getItem(LOCAL_DRAFT_KEY));
+    } catch {
+      // Local storage may be unavailable in private or restricted browsing modes.
+    }
+
+    if (draft && hasRecoverableContent(draft)) {
+      setDraftRecovery({ status: 'pending', draft });
+    } else {
+      setDraftRecovery({ status: 'ready' });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (draftRecovery.status !== 'ready') return;
+    try {
+      const serializedDraft = JSON.stringify({ ...state, selectedIds: [] });
+      if (parseSavedDraft(serializedDraft)) {
+        window.localStorage.setItem(LOCAL_DRAFT_KEY, serializedDraft);
+      }
+    } catch {
+      // Keep editing normally if the browser cannot save a local draft.
+    }
+  }, [state, draftRecovery.status]);
 
   // Helper setters that push to history
   const setElements = (newElements: LabelElement[] | ((prev: LabelElement[]) => LabelElement[])) => {
@@ -71,6 +193,7 @@ function App() {
   const setSelectedIds = (ids: string[]) => {
     // Selection changes should not typically create a new history entry
     replaceState({ ...state, selectedIds: ids });
+    setActiveSidebarTab('properties');
   };
 
   const setLabelSize = (size: { width: number; height: number }) => {
@@ -93,6 +216,21 @@ function App() {
     pushState({ ...state, gridSettings: { ...gridSettings, ...settings } });
   };
   
+  const snapAllElementsToGrid = () => {
+    if (elements.length === 0) return;
+
+    const gridSizeUnits = LabelService.mmToUnits(gridSettings.size, protocol, printSettings);
+    if (!Number.isFinite(gridSizeUnits) || gridSizeUnits <= 0) return;
+
+    const nextElements = elements.map((element) => {
+      const x = Math.round(element.x / gridSizeUnits) * gridSizeUnits;
+      const y = Math.round(element.y / gridSizeUnits) * gridSizeUnits;
+      return LabelService.applyElementUpdates(element, { x, y });
+    });
+
+    pushState({ ...state, elements: nextElements });
+  };
+
   const selectedElements = elements.filter(el => selectedIds.includes(el.id));
   const selectedElement = selectedElements.length === 1 ? selectedElements[0] : null;
   const currentDriver = drivers[protocol];
@@ -102,6 +240,40 @@ function App() {
     [elements, activeCsvRow]
   );
   const canExportBatch = Boolean(csvDataset && hasCsvBindings(elements, csvDataset.headers));
+  const outOfBoundsCount = useMemo(() => {
+    const labelWidthPx = labelSize.width * zoom;
+    const labelHeightPx = labelSize.height * zoom;
+    const tolerancePx = 0.5;
+
+    return displayElements.filter((element) => {
+      const metadata = LabelService.getElementVisualMetadata(
+        element,
+        zoom,
+        currentDriver.supportedFonts,
+        protocol,
+        printSettings
+      );
+      const left = LabelService.unitsToPx(element.x, zoom, protocol, printSettings) - metadata.translateX;
+      const top = LabelService.unitsToPx(element.y, zoom, protocol, printSettings)
+        - metadata.baselineOffsetPx
+        - metadata.translateY;
+      const right = left + metadata.rotatedWidth;
+      const bottom = top + metadata.rotatedHeight;
+
+      return left < -tolerancePx ||
+        top < -tolerancePx ||
+        right > labelWidthPx + tolerancePx ||
+        bottom > labelHeightPx + tolerancePx;
+    }).length;
+  }, [
+    displayElements,
+    labelSize.width,
+    labelSize.height,
+    zoom,
+    currentDriver.supportedFonts,
+    protocol,
+    printSettings
+  ]);
 
   const addElement = (type: ElementType) => {
     try {
@@ -115,6 +287,7 @@ function App() {
       const sameTypeCount = elements.filter((element) => element.type === type).length;
       const offset = LabelService.mmToUnits(2 * sameTypeCount, protocol, printSettings);
       const newElement = offsetElement(defaultElement, offset);
+      setActiveSidebarTab('properties');
       pushState({
         ...state,
         elements: [...elements, newElement],
@@ -146,6 +319,16 @@ function App() {
       ...state,
       elements: nextElements,
       selectedIds: nextSelectedIds
+    });
+  };
+
+  const deleteSelectedElements = () => {
+    if (selectedIds.length === 0) return;
+    const selected = new Set(selectedIds);
+    pushState({
+      ...state,
+      elements: elements.filter(el => !selected.has(el.id)),
+      selectedIds: []
     });
   };
 
@@ -181,6 +364,7 @@ function App() {
     };
 
     const pastedElements = clipboardElements.map((element) => offsetElement(element, offset, createId()));
+    setActiveSidebarTab('properties');
     pushState({
       ...state,
       elements: [...elements, ...pastedElements],
@@ -508,6 +692,7 @@ function App() {
         setCsvDataset(null);
         setCsvRecordIndex(0);
         setCsvError('');
+        setActiveSidebarTab('properties');
         resetState({
           elements: result.elements,
           labelSize: { width: result.width, height: result.height },
@@ -528,20 +713,40 @@ function App() {
     }
   };
 
-  const resetToNew = (size?: { width: number; height: number }, newProtocol?: Protocol, dpi?: number) => {
+  const resetToNew = (size?: { width: number; height: number }, newProtocol?: Protocol, dpi?: number, nextName = 'Untitled') => {
     const nextSize = size ?? { width: 102, height: 76 }
     setCsvDataset(null);
     setCsvRecordIndex(0);
     setCsvError('');
+    setActiveSidebarTab('properties');
     resetState({
       elements: [],
       selectedIds: [],
-      name: 'Untitled',
+      name: nextName.trim() || 'Untitled',
       labelSize: nextSize,
       protocol: newProtocol ?? protocol,
       printSettings: LabelService.createDefaultPrintSettings(dpi),
       gridSettings: LabelService.createDefaultGridSettings(),
     });
+  };
+
+  const restoreSavedDraft = () => {
+    if (draftRecovery.status !== 'pending') return;
+    resetState({ ...draftRecovery.draft, selectedIds: [] });
+    setCsvDataset(null);
+    setCsvRecordIndex(0);
+    setCsvError('');
+    setActiveSidebarTab('properties');
+    setDraftRecovery({ status: 'ready' });
+  };
+
+  const discardSavedDraft = () => {
+    try {
+      window.localStorage.removeItem(LOCAL_DRAFT_KEY);
+    } catch {
+      // Continue opening a blank label if local storage is unavailable.
+    }
+    setDraftRecovery({ status: 'ready' });
   };
 
   const setDpiPreservingZplTextSizes = (nextDpiRaw: number) => {
@@ -565,34 +770,52 @@ function App() {
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.repeat) return;
-      const key = e.key.toLowerCase();
+      if (e.repeat) return;
       const target = e.target as HTMLElement | null;
       const isEditingText = Boolean(target?.closest('input, textarea, select, [contenteditable="true"]'));
+      if (isEditingText) return;
 
-      if (!isEditingText && key === 'c' && selectedIds.length > 0) {
+      if (
+        selectedIds.length > 0 &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        !e.shiftKey &&
+        (e.key === 'Delete' || e.key === 'Backspace')
+      ) {
+        e.preventDefault();
+        deleteSelectedElements();
+        return;
+      }
+
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const key = e.key.toLowerCase();
+
+      if (key === 'c' && selectedIds.length > 0) {
         e.preventDefault();
         copySelected();
-      } else if (!isEditingText && key === 'x' && selectedIds.length > 0) {
+      } else if (key === 'x' && selectedIds.length > 0) {
         e.preventDefault();
         cutSelected();
-      } else if (!isEditingText && key === 'v' && clipboardElements.length > 0) {
+      } else if (key === 'v' && clipboardElements.length > 0) {
         e.preventDefault();
         pasteCopied();
       } else if (key === 'z') {
+        e.preventDefault();
         if (e.shiftKey) {
           redo();
         } else {
           undo();
         }
       } else if (key === 'y') {
+        e.preventDefault();
         redo();
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedIds, clipboardElements, copySelected, cutSelected, pasteCopied, undo, redo]);
+  }, [selectedIds, clipboardElements, copySelected, cutSelected, deleteSelectedElements, pasteCopied, undo, redo]);
 
   return (
     <div className="flex h-screen w-full flex-col bg-slate-50 text-slate-900 overflow-hidden font-sans">
@@ -617,6 +840,7 @@ function App() {
           <div className="flex items-center gap-1">
             <button
               onClick={() => {
+                setNewLabelName('Untitled');
                 setNewLabelPresetId(LabelService.DEFAULT_LABEL_SIZE_PRESET_ID);
                 setNewProtocol(protocol);
                 setNewDpi(LabelService.normalizeDpiToPreset(LabelService.getDpi(printSettings)));
@@ -642,7 +866,7 @@ function App() {
             <button
               onClick={undo}
               disabled={!canUndo}
-              title="Undo (Ctrl+Z)"
+              title="Undo (Ctrl/Cmd+Z)"
               className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
             >
               <Undo2 size={18} />
@@ -650,7 +874,7 @@ function App() {
             <button
               onClick={redo}
               disabled={!canRedo}
-              title="Redo (Ctrl+Y)"
+              title="Redo (Ctrl/Cmd+Y or Shift+Z)"
               className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
             >
               <Redo2 size={18} />
@@ -663,7 +887,7 @@ function App() {
               onClick={cutSelected}
               disabled={selectedIds.length === 0}
               aria-label="Cut selected"
-              title="Cut (Ctrl+X)"
+              title="Cut (Ctrl/Cmd+X)"
               className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
             >
               <Scissors size={17} />
@@ -673,7 +897,7 @@ function App() {
               onClick={copySelected}
               disabled={selectedIds.length === 0}
               aria-label="Copy selected"
-              title="Copy (Ctrl+C)"
+              title="Copy (Ctrl/Cmd+C)"
               className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
             >
               <Copy size={17} />
@@ -683,32 +907,10 @@ function App() {
               onClick={pasteCopied}
               disabled={clipboardElements.length === 0}
               aria-label="Paste copied objects"
-              title="Paste (Ctrl+V)"
+              title="Paste (Ctrl/Cmd+V)"
               className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
             >
               <ClipboardPaste size={17} />
-            </button>
-          </div>
-
-          <div className="h-6 w-[1px] bg-slate-200 mx-1" />
-
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setGridSettings({ enabled: !gridSettings.enabled, visible: !gridSettings.enabled })}
-              title={gridSettings.enabled ? "Disable Snap to Grid" : "Enable Snap to Grid"}
-              className={cn(
-                "p-1.5 rounded-md transition-colors",
-                gridSettings.enabled 
-                  ? "bg-blue-50 text-blue-600 hover:bg-blue-100" 
-                  : "text-slate-500 hover:bg-slate-100"
-              )}
-            >
-              <div className="relative">
-                <LayoutGrid size={18} />
-                {gridSettings.enabled && (
-                  <div className="absolute -top-1 -right-1 w-2 h-2 bg-blue-600 rounded-full border-2 border-blue-50" />
-                )}
-              </div>
             </button>
           </div>
 
@@ -734,8 +936,58 @@ function App() {
               </>
             )}
           </div>
+          <div className="h-6 w-[1px] bg-slate-200 mx-1" />
+          <button
+            type="button"
+            onClick={() => setActiveSidebarTab(activeSidebarTab === 'settings' ? 'properties' : 'settings')}
+            aria-label="Application settings"
+            aria-pressed={activeSidebarTab === 'settings'}
+            title="Application settings"
+            className={cn(
+              "p-1.5 rounded-md transition-colors",
+              activeSidebarTab === 'settings'
+                ? "bg-blue-50 text-blue-600 hover:bg-blue-100"
+                : "text-slate-500 hover:bg-slate-100"
+            )}
+          >
+            <Settings size={18} />
+          </button>
         </div>
       </header>
+
+      {draftRecovery.status === 'pending' && (
+        <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-slate-900/40 p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="restore-draft-title"
+            className="w-full max-w-md rounded-xl border border-slate-200 bg-white shadow-2xl"
+          >
+            <div className="border-b border-slate-100 p-5">
+              <h2 id="restore-draft-title" className="text-sm font-bold text-slate-900">Restore your last draft?</h2>
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                A local copy of your label is available from this browser. CSV data is not included and will need to be imported again.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 p-5">
+              <button
+                type="button"
+                onClick={discardSavedDraft}
+                className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                Discard Draft
+              </button>
+              <button
+                type="button"
+                onClick={restoreSavedDraft}
+                className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-blue-700"
+              >
+                Restore Draft
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {isNewConfirmOpen && (
         <div
@@ -755,6 +1007,17 @@ function App() {
               </div>
             </div>
             <div className="p-5 border-b border-slate-100 space-y-4">
+              <div>
+                <label htmlFor="new-label-name" className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Label Name</label>
+                <input
+                  id="new-label-name"
+                  type="text"
+                  value={newLabelName}
+                  onChange={(e) => setNewLabelName(e.target.value)}
+                  placeholder="Untitled"
+                  className="mt-2 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                />
+              </div>
               <div>
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Protocol</label>
                 <select
@@ -806,7 +1069,7 @@ function App() {
                     LabelService.LABEL_SIZE_PRESETS.find((p) => p.id === newLabelPresetId) ??
                     LabelService.LABEL_SIZE_PRESETS.find((p) => p.id === LabelService.DEFAULT_LABEL_SIZE_PRESET_ID) ??
                     LabelService.LABEL_SIZE_PRESETS[0];
-                  resetToNew({ width: preset.widthMm, height: preset.heightMm }, newProtocol, newDpi);
+                  resetToNew({ width: preset.widthMm, height: preset.heightMm }, newProtocol, newDpi, newLabelName);
                   setIsNewConfirmOpen(false);
                 }}
                 className="rounded-md bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 shadow-sm transition-all active:scale-95"
@@ -847,23 +1110,78 @@ function App() {
               <button
                 type="button"
                 onClick={() => setIsAutoZoom((v) => !v)}
+                aria-label={isAutoZoom ? "Disable automatic zoom" : "Fit label to view"}
+                aria-pressed={isAutoZoom}
+                title={isAutoZoom ? "Disable automatic zoom" : "Fit label to view"}
                 className={cn(
-                  "ml-1 rounded-md border px-2 py-1 text-[10px] font-bold uppercase tracking-widest transition-colors",
+                  "ml-1 flex h-8 w-8 items-center justify-center rounded-md border transition-colors",
                   isAutoZoom
-                    ? "border-blue-600 bg-blue-600 text-white hover:bg-blue-700"
+                    ? "border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100"
                     : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
                 )}
               >
-                Auto
+                <Expand size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setGridSettings({ enabled: !gridSettings.enabled })}
+                aria-label={gridSettings.enabled ? "Disable Snap to Grid" : "Enable Snap to Grid"}
+                aria-pressed={gridSettings.enabled}
+                title={gridSettings.enabled ? "Disable Snap to Grid" : "Enable Snap to Grid"}
+                className={cn(
+                  "flex h-8 w-8 items-center justify-center rounded-md border transition-colors",
+                  gridSettings.enabled
+                    ? "border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100"
+                    : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                )}
+              >
+                <LayoutGrid size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setGridSettings({ visible: !gridSettings.visible })}
+                aria-label={gridSettings.visible ? "Hide Grid" : "Show Grid"}
+                aria-pressed={gridSettings.visible}
+                title={gridSettings.visible ? "Hide Grid" : "Show Grid"}
+                className={cn(
+                  "flex h-8 w-8 items-center justify-center rounded-md border transition-colors",
+                  gridSettings.visible
+                    ? "border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100"
+                    : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                )}
+              >
+                <Grid3x3 size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={snapAllElementsToGrid}
+                aria-label="Snap all elements to grid"
+                title="Snap all elements to grid (Undoable)"
+                disabled={elements.length === 0}
+                className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-500"
+              >
+                <Magnet size={16} />
               </button>
             </div>
-            <div className="w-px h-4 bg-slate-200" />
-            <div className="text-[10px] font-bold text-slate-400 uppercase">
-              {LabelService.formatMm(labelSize.width)} x {LabelService.formatMm(labelSize.height)} mm
-            </div>
           </div>
+          {outOfBoundsCount > 0 && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="mb-3 flex max-w-full items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-800"
+            >
+              <AlertTriangle size={14} className="shrink-0" />
+              <span>
+                {outOfBoundsCount} {outOfBoundsCount === 1 ? 'element extends' : 'elements extend'} beyond the label and may be clipped when printed.
+              </span>
+            </div>
+          )}
 
-          <div ref={editorViewportRef} className="w-full flex-1 min-h-0 flex items-start justify-center">
+          <div
+            ref={editorViewportRef}
+            className="w-full flex-1 min-h-0 flex items-start justify-center"
+            onClick={() => setSelectedIds([])}
+          >
             <div 
               className="bg-white shadow-2xl border border-slate-300 relative transition-all duration-300 shrink-0" 
               style={{ 
@@ -955,7 +1273,65 @@ function App() {
               Data
             </button>
           </div>
-          {activeSidebarTab === 'preview' ? (
+          {activeSidebarTab === 'settings' ? (
+            <>
+              <div className="p-4 border-b flex items-center gap-2 bg-slate-50/50">
+                <Settings size={14} className="text-slate-400" />
+                <h2 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Application Settings</h2>
+              </div>
+              <div className="flex-1 overflow-y-auto p-5 space-y-8">
+                <section className="space-y-4">
+                  <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Grid Settings</h3>
+                  <PropertyInput
+                    label="Grid Size (mm)"
+                    value={gridSettings.size}
+                    onChange={(val) => setGridSettings({ size: parseFloat(val) || 1 })}
+                    type="number"
+                    step={0.1}
+                  />
+                </section>
+
+                <section className="space-y-4 border-t pt-6">
+                  <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Print Settings</h3>
+                  <PropertyInput
+                    label="Quantity"
+                    value={printSettings.quantity}
+                    onChange={(val) => setPrintSettings({ ...printSettings, quantity: parseInt(val) || 1 })}
+                    type="number"
+                    step={1}
+                  />
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase">DPI</label>
+                    <select
+                      className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                      value={String(LabelService.normalizeDpiToPreset(printSettings.dpi ?? DEFAULT_DPI))}
+                      onChange={(e) => setDpiPreservingZplTextSizes(parseInt(e.target.value, 10))}
+                    >
+                      {LabelService.COMMON_DPI_PRESETS.map((dpi) => (
+                        <option key={dpi} value={dpi}>{dpi}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <PropertyGrid>
+                    <PropertyInput
+                      label="Speed"
+                      value={printSettings.speed ?? 3}
+                      onChange={(val) => setPrintSettings({ ...printSettings, speed: parseInt(val) || 3 })}
+                      type="number"
+                      step={1}
+                    />
+                    <PropertyInput
+                      label="Darkness"
+                      value={printSettings.darkness ?? 10}
+                      onChange={(val) => setPrintSettings({ ...printSettings, darkness: parseInt(val) || 10 })}
+                      type="number"
+                      step={1}
+                    />
+                  </PropertyGrid>
+                </section>
+              </div>
+            </>
+          ) : activeSidebarTab === 'preview' ? (
             <CodePreviewPanel
               onExport={exportLabel}
               selectedIds={selectedIds}
@@ -986,25 +1362,6 @@ function App() {
             />
           ) : (
             <>
-          <div className="p-4 border-b flex items-center justify-between bg-slate-50/50">
-            <div className="flex items-center gap-2">
-              <Settings size={14} className="text-slate-400" />
-              <h2 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Properties</h2>
-            </div>
-            {selectedIds.length > 0 && (
-              <button 
-                onClick={() => {
-                  const nextElements = elements.filter(el => !selectedIds.includes(el.id));
-                  pushState({ ...state, elements: nextElements, selectedIds: [] });
-                }}
-                className="text-red-500 hover:bg-red-50 p-1.5 rounded-md transition-colors"
-                title="Delete selected"
-              >
-                <Trash2 size={14} />
-              </button>
-            )}
-          </div>
-          
           <div className="flex-1 overflow-y-auto p-5">
             {selectedElement ? (
               <div className="space-y-6">
@@ -1019,6 +1376,14 @@ function App() {
                     </span>
                     <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">{selectedElement.type}</span>
                   </div>
+                  <button
+                    onClick={deleteSelectedElements}
+                    className="text-red-500 hover:bg-red-50 p-1.5 rounded-md transition-colors"
+                    title="Delete selected (Delete/Backspace)"
+                    aria-label="Delete selected"
+                  >
+                    <Trash2 size={14} />
+                  </button>
                 </header>
 
                 {/* Primary Content Field (First) */}
@@ -1214,128 +1579,74 @@ function App() {
                   </PropertyGrid>
                 )}
               </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-20 text-center opacity-30">
-                <div className="bg-slate-100 p-6 rounded-full mb-4">
-                  <Move size={32} className="text-slate-400" />
+            ) : selectedIds.length > 0 ? (
+              <div className="space-y-6">
+                <header className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    {selectedIds.length} elements selected
+                  </span>
+                  <button
+                    onClick={deleteSelectedElements}
+                    className="text-red-500 hover:bg-red-50 p-1.5 rounded-md transition-colors"
+                    title="Delete selected (Delete/Backspace)"
+                    aria-label="Delete selected"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </header>
+                <div className="flex flex-col items-center justify-center py-16 text-center opacity-30">
+                  <div className="bg-slate-100 p-6 rounded-full mb-4">
+                    <Move size={32} className="text-slate-400" />
+                  </div>
+                  <p className="text-sm font-semibold text-slate-500">Select one element<br/>to edit its properties</p>
                 </div>
-                <p className="text-sm font-semibold text-slate-500">Select an element<br/>to edit properties</p>
+              </div>
+            ) : (
+              <div className="space-y-8">
+                <section className="space-y-4">
+                  <header className="flex items-center gap-2">
+                    <span className="bg-blue-100 text-blue-600 p-1.5 rounded">
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                        <path d="M7 7h10M7 12h10M7 17h10" />
+                      </svg>
+                    </span>
+                    <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Label Settings</h3>
+                  </header>
+                  <PropertyInput
+                    label="Name"
+                    value={labelName}
+                    onChange={(val) => setLabelName(val)}
+                  />
+                  <PropertyGrid>
+                    <PropertyInput
+                      label="Width (mm)"
+                      value={LabelService.formatMm(labelSize.width)}
+                      onChange={(val) => setLabelSize({ ...labelSize, width: parseFloat(val) })}
+                      type="number"
+                      step={0.1}
+                    />
+                    <PropertyInput
+                      label="Height (mm)"
+                      value={LabelService.formatMm(labelSize.height)}
+                      onChange={(val) => setLabelSize({ ...labelSize, height: parseFloat(val) })}
+                      type="number"
+                      step={0.1}
+                    />
+                  </PropertyGrid>
+                </section>
               </div>
             )}
-          </div>
-
-          {/* Label Settings (Bottom of sidebar) */}
-          <div className="mt-auto border-t p-5 bg-slate-50/50 max-h-[50%] overflow-y-auto">
-            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4">Label Settings</h3>
-            <div className="mb-4">
-              <PropertyInput 
-                label="Name" 
-                value={labelName} 
-                onChange={(val) => setLabelName(val)}
-              />
-            </div>
-            <PropertyGrid>
-              <PropertyInput 
-                label="Width (mm)" 
-                value={LabelService.formatMm(labelSize.width)} 
-                onChange={(val) => setLabelSize({ ...labelSize, width: parseFloat(val) })}
-                type="number"
-                step={0.1}
-              />
-              <PropertyInput 
-                label="Height (mm)" 
-                value={LabelService.formatMm(labelSize.height)} 
-                onChange={(val) => setLabelSize({ ...labelSize, height: parseFloat(val) })}
-                type="number"
-                step={0.1}
-              />
-            </PropertyGrid>
-
-            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-6 mb-4">Grid & Snapping</h3>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium text-slate-700 flex items-center gap-2">
-                  <LayoutGrid size={14} className="text-slate-400" />
-                  Show Grid
-                </label>
-                <button
-                  onClick={() => setGridSettings({ visible: !gridSettings.visible })}
-                  className={cn(
-                    "w-8 h-4 rounded-full transition-colors relative",
-                    gridSettings.visible ? "bg-blue-600" : "bg-slate-200"
-                  )}
-                >
-                  <div className={cn(
-                    "absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all",
-                    gridSettings.visible ? "left-[18px]" : "left-[2px]"
-                  )} />
-                </button>
-              </div>
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium text-slate-700 flex items-center gap-2">
-                  <Move size={14} className="text-slate-400" />
-                  Snap to Grid
-                </label>
-                <button
-                  onClick={() => setGridSettings({ enabled: !gridSettings.enabled })}
-                  className={cn(
-                    "w-8 h-4 rounded-full transition-colors relative",
-                    gridSettings.enabled ? "bg-blue-600" : "bg-slate-200"
-                  )}
-                >
-                  <div className={cn(
-                    "absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all",
-                    gridSettings.enabled ? "left-[18px]" : "left-[2px]"
-                  )} />
-                </button>
-              </div>
-              <PropertyInput 
-                label="Grid Size (mm)" 
-                value={gridSettings.size} 
-                onChange={(val) => setGridSettings({ size: parseFloat(val) || 1 })}
-                type="number"
-                step={0.1}
-              />
-            </div>
-
-            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-6 mb-4">Print Settings</h3>
-            <div className="space-y-4">
-              <PropertyInput 
-                label="Quantity" 
-                value={printSettings.quantity} 
-                onChange={(val) => setPrintSettings({ ...printSettings, quantity: parseInt(val) || 1 })}
-                type="number"
-                step={1}
-              />
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-bold text-slate-400 uppercase">DPI</label>
-                <select
-                  className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                  value={String(LabelService.normalizeDpiToPreset(printSettings.dpi ?? DEFAULT_DPI))}
-                  onChange={(e) => setDpiPreservingZplTextSizes(parseInt(e.target.value, 10))}
-                >
-                  {LabelService.COMMON_DPI_PRESETS.map((dpi) => (
-                    <option key={dpi} value={dpi}>{dpi}</option>
-                  ))}
-                </select>
-              </div>
-              <PropertyGrid>
-                <PropertyInput 
-                  label="Speed" 
-                  value={printSettings.speed ?? 3} 
-                  onChange={(val) => setPrintSettings({ ...printSettings, speed: parseInt(val) || 3 })}
-                  type="number"
-                  step={1}
-                />
-                <PropertyInput 
-                  label="Darkness" 
-                  value={printSettings.darkness ?? 10} 
-                  onChange={(val) => setPrintSettings({ ...printSettings, darkness: parseInt(val) || 10 })}
-                  type="number"
-                  step={1}
-                />
-              </PropertyGrid>
-            </div>
           </div>
             </>
           )}
@@ -1352,6 +1663,10 @@ function App() {
           <div className="w-px h-3 bg-slate-200" />
           <span className="flex items-center gap-1.5">
             Protocol: <span className="text-blue-600 font-mono tracking-normal">{protocol}</span>
+          </span>
+          <div className="w-px h-3 bg-slate-200" />
+          <span>
+            Label: {LabelService.formatMm(labelSize.width)} x {LabelService.formatMm(labelSize.height)} mm
           </span>
           <div className="w-px h-3 bg-slate-200" />
           <span>Elements: {elements.length}</span>

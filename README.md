@@ -2,53 +2,58 @@
 
 ![Etikit Screenshot](etikit.png)
 
-Etikit is a minimalistic, web-based application designed for creating and formatting labels. It supports both TPCL and ZPL label formats with high precision.
+Etikit is a browser-based label designer that creates printer-ready files for Toshiba TPCL and Zebra ZPL printers.
 
 ## Features
 
-- **Visual Label Designer**: A simple and intuitive drag-and-drop interface for designing labels.
-- **Precision Alignment Tools**: Align and distribute elements with pixel-perfect precision.
-- **Snap to Grid**: Customizable grid for precise element placement.
-- **History Management**: Full Undo and Redo support for all editor actions.
-- **Element Support**: Add text, lines, rectangles, barcodes, and QR codes.
-- **Printer Integration**: Generates printer-ready code for TPCL and ZPL specifications.
-- **Template Management**: Save/load designs as JSON templates and import/export printer-ready files.
-- **Label Size Presets**: Choose from common industrial sizes or set custom dimensions.
-- **Modern UI**: Streamlined interface with integrated protocol indicators.
+- Design labels with text, lines, rectangles, barcodes, and QR codes.
+- Set label dimensions in millimeters or choose a preset when creating a label.
+- Adjust element content, position, rotation, size, fonts, and barcode type in the Properties panel.
+- Align selected elements and distribute groups of three or more from the top toolbar.
+- Configure grid visibility, snapping, grid size, DPI, quantity, speed, and darkness from Application Settings.
+- Use undo/redo, cut/copy/paste, and Delete/Backspace shortcuts; hover over the related toolbar or delete buttons to see their shortcuts.
+- See a warning when elements extend beyond the label boundary and may be clipped when printed.
+- Recover the last label from a browser-local draft after reopening the app; CSV data must be imported again.
+- Preview generated TPCL or ZPL code, copy it, or download the printer file.
+- Save templates as JSON and open JSON, TPCL (`.etec`), or ZPL (`.ezpl`) files.
+- Import CSV data, preview records, insert column placeholders into text/barcode/QR content, and download a batch print file.
+- Zoom manually or use Auto to fit the label in the editor.
+
+## Requirements
+
+- Node.js (latest LTS recommended)
+- npm
 
 ## Getting Started
 
-### Prerequisites
+Clone the repository and install dependencies:
 
-- [Node.js](https://nodejs.org/) (latest LTS recommended)
+```bash
+git clone https://github.com/flashmood69/etikit.git
+cd etikit
+npm install
+```
 
-### Installation
+Start the development server:
 
-1. Clone the repository:
-   ```bash
-   git clone <repository-url>
-   cd etikit
-   ```
+```bash
+npm run dev
+```
 
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-3. Start the application:
-   ```bash
-   npm run dev
-   ```
+Create a production build with `npm run build`. To serve the build locally, run `npm run preview`.
 
 ## Usage
 
-- **Creating**: Click the **+** (New) button to start a new label.
-- **Designing**: Add elements from the left toolbar and drag them onto the label.
-- **Precision**: Use the alignment buttons in the top bar or toggle the grid.
-- **Editing**: Use the right sidebar to adjust properties like content, font, and rotation.
-- **Managing**: Use **Load** to import files and **Save** to store templates.
-- **Exporting**: Click **Export** to generate the printer-ready file (ZPL or TPCL).
+1. Select **New Label** to name the label and choose its printer protocol, DPI, and size preset.
+2. Add elements from the left toolbar. Select an element to edit its properties; click an empty area of the label or editor to return to label name and dimensions.
+3. Use the top toolbar to align elements, toggle snapping, and access Application Settings for grid and print options.
+4. Open the **Code** panel to preview generated output, copy it, or download a TPCL (`.etec`) or ZPL (`.ezpl`) file.
+5. Use **Save Template** to download a JSON template. Use **Load Template** to open a JSON template or supported TPCL/ZPL file.
+
+### CSV Batch Printing
+
+In text, barcode, or QR content, use a placeholder matching a CSV column name, such as `{{ProductCode}}`. Open the **Data** panel to import a CSV and preview its records. Insert a CSV field from the Properties panel, then select **Download Batch** to generate one printer file containing the records.
 
 ## Disclaimer
 
-TPCL and ZPL are proprietary protocols developed by TEC® and Zebra Technologies respectively. This project is not affiliated with or endorsed by TEC® or Zebra Technologies.
+TPCL (TEC Printer Control Language) is a printer language used by Toshiba Tec printers. ZPL (Zebra Programming Language) is a printer language associated with Zebra Technologies. Etikit is an independent project and is not affiliated with or endorsed by Toshiba Tec Corporation or Zebra Technologies Corporation. All company names and trademarks belong to their respective owners.

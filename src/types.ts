@@ -11,6 +11,7 @@ export interface BaseElement {
   y: number;
   rotation: number;
   reverse?: boolean;
+  placeholderPreviewValues?: Record<string, string>;
 }
 
 export interface TextElement extends BaseElement {
@@ -19,6 +20,8 @@ export interface TextElement extends BaseElement {
   fontCode: string;
   width: number; // Magnification or scale
   height: number; // Magnification or scale
+  fontRendering?: 'bitmap' | 'outline';
+  inlineText?: boolean;
   zplFieldOriginAscentRatio?: number;
 }
 

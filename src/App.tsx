@@ -235,6 +235,38 @@ function App() {
     pushState({ ...state, gridSettings: { ...gridSettings, ...settings } });
   };
   
+  const snapPositionToVisualGrid = (
+    element: LabelElement,
+    x: number,
+    y: number,
+    gridSizeUnits: number
+  ) => {
+    const metadata = LabelService.getElementVisualMetadata(
+      element,
+      zoom,
+      drivers[protocol].supportedFonts,
+      protocol,
+      printSettings
+    );
+    const visualOffsetX = LabelService.pxToUnits(
+      metadata.translateX,
+      zoom,
+      protocol,
+      printSettings
+    );
+    const visualOffsetY = LabelService.pxToUnits(
+      metadata.translateY + metadata.baselineOffsetPx,
+      zoom,
+      protocol,
+      printSettings
+    );
+
+    return {
+      x: Math.round((x - visualOffsetX) / gridSizeUnits) * gridSizeUnits + visualOffsetX,
+      y: Math.round((y - visualOffsetY) / gridSizeUnits) * gridSizeUnits + visualOffsetY
+    };
+  };
+
   const snapAllElementsToGrid = () => {
     if (elements.length === 0) return;
 
@@ -242,9 +274,13 @@ function App() {
     if (!Number.isFinite(gridSizeUnits) || gridSizeUnits <= 0) return;
 
     const nextElements = elements.map((element) => {
-      const x = Math.round(element.x / gridSizeUnits) * gridSizeUnits;
-      const y = Math.round(element.y / gridSizeUnits) * gridSizeUnits;
-      return LabelService.applyElementUpdates(element, { x, y });
+      const position = snapPositionToVisualGrid(
+        element,
+        element.x,
+        element.y,
+        gridSizeUnits
+      );
+      return LabelService.applyElementUpdates(element, position);
     });
 
     pushState({ ...state, elements: nextElements });
@@ -472,8 +508,12 @@ function App() {
 
     if (gridSettings.enabled) {
       const gridSizeUnits = LabelService.mmToUnits(gridSettings.size, protocol, printSettings);
-      x = Math.round(x / gridSizeUnits) * gridSizeUnits;
-      y = Math.round(y / gridSizeUnits) * gridSizeUnits;
+      const element = elements.find((item) => item.id === id);
+      if (element && Number.isFinite(gridSizeUnits) && gridSizeUnits > 0) {
+        const position = snapPositionToVisualGrid(element, x, y, gridSizeUnits);
+        x = position.x;
+        y = position.y;
+      }
     }
 
     updateElement(id, { x, y });

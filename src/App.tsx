@@ -9,7 +9,15 @@ import packageJson from '../package.json'
 import { LabelElement, ElementType, TextElement, BarcodeElement, QRCodeElement, LineElement, RectangleElement, LabelTemplate, PrintSettings, Protocol, FontMetadata, DEFAULT_DPI, EditorState } from './types'
 import { drivers } from './drivers'
 import * as LabelService from './services/label-service'
-import { CsvDataset, hasCsvBindings, parseCsv, resolveCsvFields } from './services/csv-service'
+import {
+  CsvDataset,
+  getDefaultPlaceholderTestValue,
+  getPlaceholderFields,
+  hasCsvBindings,
+  parseCsv,
+  resolveCsvFields,
+  resolvePreviewFields
+} from './services/csv-service'
 import { useHistory } from './hooks/useHistory'
 
 function cn(...inputs: ClassValue[]) {
@@ -150,12 +158,20 @@ function App() {
   const [newDpi, setNewDpi] = useState<number>(DEFAULT_DPI);
   const [activeSidebarTab, setActiveSidebarTab] = useState<'properties' | 'preview' | 'batch' | 'settings'>('properties');
   const [draftRecovery, setDraftRecovery] = useState<DraftRecoveryState>({ status: 'checking' });
+  const [draftSaveStatus, setDraftSaveStatus] = useState<'checking' | 'saved' | 'unavailable'>('checking');
   const [csvDataset, setCsvDataset] = useState<CsvDataset | null>(null);
   const [csvRecordIndex, setCsvRecordIndex] = useState(0);
   const [csvError, setCsvError] = useState('');
+  const [templateSaveNotice, setTemplateSaveNotice] = useState(0);
   const [clipboardElements, setClipboardElements] = useState<LabelElement[]>([]);
   const [pasteCount, setPasteCount] = useState(0);
   const editorViewportRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!templateSaveNotice) return;
+    const timeout = window.setTimeout(() => setTemplateSaveNotice(0), 2200);
+    return () => window.clearTimeout(timeout);
+  }, [templateSaveNotice]);
 
   useEffect(() => {
     let draft: EditorState | null = null;
@@ -176,11 +192,14 @@ function App() {
     if (draftRecovery.status !== 'ready') return;
     try {
       const serializedDraft = JSON.stringify({ ...state, selectedIds: [] });
-      if (parseSavedDraft(serializedDraft)) {
-        window.localStorage.setItem(LOCAL_DRAFT_KEY, serializedDraft);
+      if (!parseSavedDraft(serializedDraft)) {
+        setDraftSaveStatus('unavailable');
+        return;
       }
+      window.localStorage.setItem(LOCAL_DRAFT_KEY, serializedDraft);
+      setDraftSaveStatus('saved');
     } catch {
-      // Keep editing normally if the browser cannot save a local draft.
+      setDraftSaveStatus('unavailable');
     }
   }, [state, draftRecovery.status]);
 
@@ -193,7 +212,7 @@ function App() {
   const setSelectedIds = (ids: string[]) => {
     // Selection changes should not typically create a new history entry
     replaceState({ ...state, selectedIds: ids });
-    setActiveSidebarTab('properties');
+    if (activeSidebarTab !== 'preview') setActiveSidebarTab('properties');
   };
 
   const setLabelSize = (size: { width: number; height: number }) => {
@@ -236,11 +255,23 @@ function App() {
   const currentDriver = drivers[protocol];
   const activeCsvRow = csvDataset?.rows[csvRecordIndex];
   const displayElements = useMemo(
-    () => resolveCsvFields(elements, activeCsvRow),
+    () => resolvePreviewFields(elements, activeCsvRow),
     [elements, activeCsvRow]
   );
+  const outputElements = csvDataset ? resolveCsvFields(elements, activeCsvRow) : elements;
+  const usedPlaceholderFields = useMemo(
+    () => [...new Set(elements.flatMap((element) =>
+      'content' in element ? getPlaceholderFields(element.content) : []
+    ))],
+    [elements]
+  );
+  const missingCsvFields = useMemo(() => {
+    if (!csvDataset) return [];
+    const availableHeaders = new Set(csvDataset.headers);
+    return usedPlaceholderFields.filter((field) => !availableHeaders.has(field));
+  }, [csvDataset, usedPlaceholderFields]);
   const canExportBatch = Boolean(csvDataset && hasCsvBindings(elements, csvDataset.headers));
-  const outOfBoundsCount = useMemo(() => {
+  const outOfBoundsIds = useMemo(() => {
     const labelWidthPx = labelSize.width * zoom;
     const labelHeightPx = labelSize.height * zoom;
     const tolerancePx = 0.5;
@@ -264,7 +295,7 @@ function App() {
         top < -tolerancePx ||
         right > labelWidthPx + tolerancePx ||
         bottom > labelHeightPx + tolerancePx;
-    }).length;
+    }).map((element) => element.id);
   }, [
     displayElements,
     labelSize.width,
@@ -274,6 +305,7 @@ function App() {
     protocol,
     printSettings
   ]);
+  const outOfBoundsCount = outOfBoundsIds.length;
 
   const addElement = (type: ElementType) => {
     try {
@@ -306,10 +338,50 @@ function App() {
     pushState({ ...state, elements: nextElements });
   };
 
-  const appendCsvField = (element: TextElement | BarcodeElement | QRCodeElement, field: string) => {
-    const content = element.content ?? '';
-    const separator = element.type === 'text' && content && !/\s$/.test(content) ? ' ' : '';
-    updateElement(element.id, { content: `${content}${separator}{{${field}}}` });
+  const appendPlaceholderField = (element: TextElement | BarcodeElement | QRCodeElement, field: string) => {
+    const existingFields = getPlaceholderFields(element.content);
+    const hasPlaceholder = existingFields.length > 0;
+    const currentContent = element.content ?? '';
+    const existingValues = element.placeholderPreviewValues ?? {};
+
+    if (hasPlaceholder) {
+      const separator = element.type === 'text' && currentContent && !/\s$/.test(currentContent) ? ' ' : '';
+      updateElement(element.id, {
+        content: `${currentContent}${separator}{{${field}}}`,
+        placeholderPreviewValues: {
+          ...existingValues,
+          [field]: existingValues[field] ?? getDefaultPlaceholderTestValue(element, field)
+        }
+      });
+      return;
+    }
+
+    const previewElement = displayElements.find((displayElement) => displayElement.id === element.id);
+    const currentValue = previewElement && 'content' in previewElement
+      ? previewElement.content ?? ''
+      : element.content ?? getDefaultPlaceholderTestValue(element, field);
+    const testValue = currentValue || getDefaultPlaceholderTestValue(element, field);
+    updateElement(element.id, {
+      content: `{{${field}}}`,
+      placeholderPreviewValues: {
+        ...existingValues,
+        [field]: testValue
+      }
+    });
+  };
+
+  const setPlaceholderTestValue = (elementId: string, field: string, value: string) => {
+    const nextElements = elements.map((element) => element.id === elementId
+      ? {
+          ...element,
+          placeholderPreviewValues: {
+            ...element.placeholderPreviewValues,
+            [field]: value
+          }
+        }
+      : element
+    );
+    replaceState({ ...state, elements: nextElements });
   };
 
   const deleteElement = (id: string) => {
@@ -330,6 +402,27 @@ function App() {
       elements: elements.filter(el => !selected.has(el.id)),
       selectedIds: []
     });
+  };
+
+  const nudgeSelectedElements = (dxMm: number, dyMm: number) => {
+    if (selectedIds.length === 0) return;
+    const selected = new Set(selectedIds);
+    const dx = LabelService.mmToUnits(dxMm, protocol, printSettings);
+    const dy = LabelService.mmToUnits(dyMm, protocol, printSettings);
+    const nextElements = elements.map((element) => {
+      if (!selected.has(element.id)) return element;
+      if (element.type === 'line') {
+        return {
+          ...element,
+          x: element.x + dx,
+          y: element.y + dy,
+          x2: element.x2 + dx,
+          y2: element.y2 + dy
+        };
+      }
+      return { ...element, x: element.x + dx, y: element.y + dy };
+    });
+    pushState({ ...state, elements: nextElements });
   };
 
   const copySelected = () => {
@@ -639,7 +732,7 @@ function App() {
       name: labelName,
       width: labelSize.width,
       height: labelSize.height,
-      elements: displayElements,
+      elements: outputElements,
       printSettings,
       protocol
     };
@@ -680,6 +773,7 @@ function App() {
       protocol
     };
     LabelService.saveTemplate(template);
+    setTemplateSaveNotice((notice) => notice + 1);
   };
 
   const loadTemplate = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -788,6 +882,23 @@ function App() {
         return;
       }
 
+      if (
+        selectedIds.length > 0 &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)
+      ) {
+        e.preventDefault();
+        const baseStepMm = gridSettings.enabled ? gridSettings.size : 0.1;
+        const stepMm = baseStepMm * (e.shiftKey ? 10 : 1);
+        nudgeSelectedElements(
+          e.key === 'ArrowLeft' ? -stepMm : e.key === 'ArrowRight' ? stepMm : 0,
+          e.key === 'ArrowUp' ? -stepMm : e.key === 'ArrowDown' ? stepMm : 0
+        );
+        return;
+      }
+
       if (!(e.ctrlKey || e.metaKey)) return;
       const key = e.key.toLowerCase();
 
@@ -815,7 +926,18 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedIds, clipboardElements, copySelected, cutSelected, deleteSelectedElements, pasteCopied, undo, redo]);
+  }, [
+    selectedIds,
+    clipboardElements,
+    gridSettings,
+    nudgeSelectedElements,
+    copySelected,
+    cutSelected,
+    deleteSelectedElements,
+    pasteCopied,
+    undo,
+    redo
+  ]);
 
   return (
     <div className="flex h-screen w-full flex-col bg-slate-50 text-slate-900 overflow-hidden font-sans">
@@ -967,6 +1089,13 @@ function App() {
               <h2 id="restore-draft-title" className="text-sm font-bold text-slate-900">Restore your last draft?</h2>
               <p className="mt-1 text-xs leading-5 text-slate-500">
                 A local copy of your label is available from this browser. CSV data is not included and will need to be imported again.
+              </p>
+              <p className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                <span className="font-semibold text-slate-800">{draftRecovery.draft.name || 'Untitled'}</span>
+                {' · '}
+                {LabelService.formatMm(draftRecovery.draft.labelSize.width)} x {LabelService.formatMm(draftRecovery.draft.labelSize.height)} mm
+                {' · '}
+                {draftRecovery.draft.elements.length} {draftRecovery.draft.elements.length === 1 ? 'element' : 'elements'}
               </p>
             </div>
             <div className="flex justify-end gap-2 p-5">
@@ -1168,12 +1297,21 @@ function App() {
             <div
               role="status"
               aria-live="polite"
-              className="mb-3 flex max-w-full items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-800"
+              className="mb-3 flex max-w-full items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-800"
             >
-              <AlertTriangle size={14} className="shrink-0" />
-              <span>
-                {outOfBoundsCount} {outOfBoundsCount === 1 ? 'element extends' : 'elements extend'} beyond the label and may be clipped when printed.
+              <span className="flex min-w-0 items-center gap-2">
+                <AlertTriangle size={14} className="shrink-0" />
+                <span>
+                  {outOfBoundsCount} {outOfBoundsCount === 1 ? 'element extends' : 'elements extend'} beyond the label and may be clipped when printed.
+                </span>
               </span>
+              <button
+                type="button"
+                onClick={() => setSelectedIds(outOfBoundsIds)}
+                className="shrink-0 rounded px-2 py-1 font-semibold text-amber-900 underline decoration-amber-400 underline-offset-2 hover:bg-amber-100"
+              >
+                Select affected
+              </button>
             </div>
           )}
 
@@ -1198,6 +1336,28 @@ function App() {
                     backgroundSize: `${gridSettings.size * zoom}px ${gridSettings.size * zoom}px`
                   }} 
                 />
+              )}
+
+              {elements.length === 0 && (
+                <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center p-6 text-center">
+                  <div className="max-w-56">
+                    <p className="text-sm font-semibold text-slate-700">Start with a text element</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">
+                      Add text, a barcode, or a shape using the toolbar.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        addElement('text');
+                      }}
+                      className="pointer-events-auto mt-3 inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-blue-700"
+                    >
+                      <Type size={13} />
+                      Add Text
+                    </button>
+                  </div>
+                </div>
               )}
 
               {displayElements.map((el) => (
@@ -1288,6 +1448,7 @@ function App() {
                     onChange={(val) => setGridSettings({ size: parseFloat(val) || 1 })}
                     type="number"
                     step={0.1}
+                    min={0.1}
                   />
                 </section>
 
@@ -1299,6 +1460,7 @@ function App() {
                     onChange={(val) => setPrintSettings({ ...printSettings, quantity: parseInt(val) || 1 })}
                     type="number"
                     step={1}
+                    min={1}
                   />
                   <div className="space-y-1.5">
                     <label className="text-[10px] font-bold text-slate-400 uppercase">DPI</label>
@@ -1336,6 +1498,14 @@ function App() {
               onExport={exportLabel}
               selectedIds={selectedIds}
               recordInfo={csvDataset ? { index: csvRecordIndex, total: csvDataset.rows.length } : undefined}
+              copyLabel={{
+                name: labelName,
+                width: labelSize.width,
+                height: labelSize.height,
+                elements: outputElements,
+                printSettings,
+                protocol
+              }}
               label={{
                 name: labelName,
                 width: labelSize.width,
@@ -1349,6 +1519,8 @@ function App() {
             <BatchDataPanel
               dataset={csvDataset}
               recordIndex={csvRecordIndex}
+              boundFields={usedPlaceholderFields}
+              missingFields={missingCsvFields}
               error={csvError}
               canExportBatch={canExportBatch}
               onImport={importCsv}
@@ -1390,17 +1562,21 @@ function App() {
                 {selectedElement.type === 'text' && (
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold text-slate-400 uppercase">Content</label>
-                    <textarea 
+                    <CommitTextField
+                      multiline
                       className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 min-h-[80px]"
-                      value={(selectedElement as TextElement).content}
-                      onChange={(e) => updateElement(selectedElement.id, { content: e.target.value })}
+                      value={(selectedElement as TextElement).content ?? ''}
+                      onCommit={(content) => updateElement(selectedElement.id, { content })}
                     />
-                    {csvDataset && (
-                      <CsvFieldPicker
-                        headers={csvDataset.headers}
-                        onInsert={(field) => appendCsvField(selectedElement as TextElement, field)}
-                      />
-                    )}
+                    <PlaceholderFieldPicker
+                      element={selectedElement as TextElement}
+                      content={(selectedElement as TextElement).content}
+                      headers={csvDataset?.headers}
+                      onInsert={(field) => appendPlaceholderField(selectedElement as TextElement, field)}
+                      onTestValueChange={(field, value) =>
+                        setPlaceholderTestValue(selectedElement.id, field, value)
+                      }
+                    />
                   </div>
                 )}
 
@@ -1409,18 +1585,20 @@ function App() {
                     <label className="text-[10px] font-bold text-slate-400 uppercase">
                       {selectedElement.type === 'barcode' ? 'Data' : 'Data'}
                     </label>
-                    <input 
-                      type="text"
+                    <CommitTextField
                       className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                      value={(selectedElement as BarcodeElement | QRCodeElement).content}
-                      onChange={(e) => updateElement(selectedElement.id, { content: e.target.value })}
+                      value={(selectedElement as BarcodeElement | QRCodeElement).content ?? ''}
+                      onCommit={(content) => updateElement(selectedElement.id, { content })}
                     />
-                    {csvDataset && (
-                      <CsvFieldPicker
-                        headers={csvDataset.headers}
-                        onInsert={(field) => appendCsvField(selectedElement as BarcodeElement | QRCodeElement, field)}
-                      />
-                    )}
+                    <PlaceholderFieldPicker
+                      element={selectedElement as BarcodeElement | QRCodeElement}
+                      content={(selectedElement as BarcodeElement | QRCodeElement).content}
+                      headers={csvDataset?.headers}
+                      onInsert={(field) => appendPlaceholderField(selectedElement as BarcodeElement | QRCodeElement, field)}
+                      onTestValueChange={(field, value) =>
+                        setPlaceholderTestValue(selectedElement.id, field, value)
+                      }
+                    />
                   </div>
                 )}
 
@@ -1454,6 +1632,9 @@ function App() {
                     </select>
                   </div>
                 </PropertyGrid>
+                <p className="-mt-4 text-[10px] leading-4 text-slate-500">
+                  Use arrow keys to nudge; hold Shift for a larger step.
+                </p>
 
                 {/* Secondary Properties */}
                 {selectedElement.type === 'text' && (
@@ -1470,6 +1651,39 @@ function App() {
                         ))}
                       </select>
                     </div>
+                    {protocol === 'tpcl' && (
+                      <div className="space-y-2">
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase">Font Format</label>
+                          <select
+                            className="w-full rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
+                            value={(selectedElement as TextElement).fontRendering ?? 'bitmap'}
+                            onChange={(e) => updateElement(selectedElement.id, {
+                              fontRendering: e.target.value as TextElement['fontRendering']
+                            })}
+                          >
+                            <option value="bitmap">Bitmap (PC / RC)</option>
+                            <option value="outline">Outline (PV / RV)</option>
+                          </select>
+                        </div>
+                        {(selectedElement as TextElement).fontRendering === 'outline' && (
+                          <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+                            <input
+                              type="checkbox"
+                              className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                              checked={(selectedElement as TextElement).inlineText ?? false}
+                              onChange={(e) => updateElement(selectedElement.id, { inlineText: e.target.checked })}
+                            />
+                            Inline text in PV command
+                          </label>
+                        )}
+                        {(selectedElement as TextElement).fontRendering === 'outline' && (
+                          <p className="text-[10px] leading-4 text-slate-500">
+                            Outline font support and available font IDs depend on the printer.
+                          </p>
+                        )}
+                      </div>
+                    )}
                     <PropertyGrid>
                       <PropertyInput 
                         label={protocol === 'zpl' ? 'Font Width (dots)' : 'Width Scale'} 
@@ -1477,6 +1691,7 @@ function App() {
                         onChange={(val) => updateElement(selectedElement.id, { width: parseFloat(val) })}
                         type="number"
                         step={protocol === 'zpl' ? 1 : 0.1}
+                        min={protocol === 'zpl' ? 1 : 0.1}
                       />
                       <PropertyInput 
                         label={protocol === 'zpl' ? 'Font Height (dots)' : 'Height Scale'} 
@@ -1484,6 +1699,7 @@ function App() {
                         onChange={(val) => updateElement(selectedElement.id, { height: parseFloat(val) })}
                         type="number"
                         step={protocol === 'zpl' ? 1 : 0.1}
+                        min={protocol === 'zpl' ? 1 : 0.1}
                       />
                     </PropertyGrid>
                   </>
@@ -1510,6 +1726,7 @@ function App() {
                         onChange={(val) => updateElement(selectedElement.id, { height: parseInt(val) })}
                         type="number"
                         step={1}
+                        min={1}
                       />
                       <PropertyInput 
                         label="Narrow Bar" 
@@ -1517,6 +1734,7 @@ function App() {
                         onChange={(val) => updateElement(selectedElement.id, { width: parseInt(val) })}
                         type="number"
                         step={1}
+                        min={1}
                       />
                     </PropertyGrid>
                   </>
@@ -1529,6 +1747,7 @@ function App() {
                     onChange={(val) => updateElement(selectedElement.id, { size: parseInt(val) })}
                     type="number"
                     step={1}
+                    min={1}
                   />
                 )}
 
@@ -1556,6 +1775,7 @@ function App() {
                       onChange={(val) => updateElement(selectedElement.id, { thickness: parseInt(val) })}
                       type="number"
                       step={1}
+                      min={1}
                     />
                   </div>
                 )}
@@ -1568,6 +1788,7 @@ function App() {
                       onChange={(val) => updateElement(selectedElement.id, { width: LabelService.mmToUnits(parseFloat(val), protocol, printSettings) })}
                       type="number"
                       step={0.1}
+                      min={0.1}
                     />
                     <PropertyInput 
                       label="Height (mm)" 
@@ -1575,6 +1796,7 @@ function App() {
                       onChange={(val) => updateElement(selectedElement.id, { height: LabelService.mmToUnits(parseFloat(val), protocol, printSettings) })}
                       type="number"
                       step={0.1}
+                      min={0.1}
                     />
                   </PropertyGrid>
                 )}
@@ -1635,6 +1857,7 @@ function App() {
                       onChange={(val) => setLabelSize({ ...labelSize, width: parseFloat(val) })}
                       type="number"
                       step={0.1}
+                      min={0.1}
                     />
                     <PropertyInput
                       label="Height (mm)"
@@ -1642,6 +1865,7 @@ function App() {
                       onChange={(val) => setLabelSize({ ...labelSize, height: parseFloat(val) })}
                       type="number"
                       step={0.1}
+                      min={0.1}
                     />
                   </PropertyGrid>
                 </section>
@@ -1656,17 +1880,38 @@ function App() {
       {/* Footer */}
       <footer className="h-8 border-t bg-white px-6 flex items-center justify-between text-[9px] font-bold text-slate-400 uppercase tracking-[0.15em]">
         <div className="flex gap-6 items-center">
-          <span className="flex items-center gap-1.5">
-            <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
-            Ready
+          <span
+            className="flex items-center gap-1.5"
+            title="The local draft is stored in this browser. Save Template downloads a separate file."
+            aria-live="polite"
+          >
+            <div className={cn(
+              "h-1.5 w-1.5 rounded-full",
+              draftRecovery.status === 'pending' || draftSaveStatus === 'saved'
+                ? "bg-green-500"
+                : draftSaveStatus === 'unavailable'
+                  ? "bg-amber-500"
+                  : "bg-slate-300"
+            )} />
+            {draftRecovery.status === 'pending'
+              ? 'Draft available'
+              : draftRecovery.status === 'checking' || draftSaveStatus === 'checking'
+                ? 'Checking draft'
+                : draftSaveStatus === 'saved'
+                  ? 'Saved locally'
+                  : 'Local save unavailable'}
           </span>
           <div className="w-px h-3 bg-slate-200" />
           <span className="flex items-center gap-1.5">
             Protocol: <span className="text-blue-600 font-mono tracking-normal">{protocol}</span>
           </span>
           <div className="w-px h-3 bg-slate-200" />
+          <span className="max-w-48 truncate" title={labelName || 'Untitled'}>
+            Name: <span className="text-slate-600 tracking-normal">{labelName || 'Untitled'}</span>
+          </span>
+          <div className="w-px h-3 bg-slate-200" />
           <span>
-            Label: {LabelService.formatMm(labelSize.width)} x {LabelService.formatMm(labelSize.height)} mm
+            Size: {LabelService.formatMm(labelSize.width)} x {LabelService.formatMm(labelSize.height)} mm
           </span>
           <div className="w-px h-3 bg-slate-200" />
           <span>Elements: {elements.length}</span>
@@ -1675,28 +1920,108 @@ function App() {
           <span>Etikit v{packageJson.version}</span>
         </div>
       </footer>
+      {templateSaveNotice > 0 && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="pointer-events-none fixed bottom-11 left-1/2 z-[1200] -translate-x-1/2 rounded-lg border border-emerald-200 bg-white px-4 py-2 text-xs font-semibold text-emerald-700 shadow-lg"
+        >
+          Template downloaded
+        </div>
+      )}
     </div>
   )
 }
 
-function CsvFieldPicker({ headers, onInsert }: { headers: string[], onInsert: (field: string) => void }) {
-  const [field, setField] = useState('');
+function PlaceholderFieldPicker({
+  element,
+  content,
+  headers,
+  onInsert,
+  onTestValueChange
+}: {
+  element: TextElement | BarcodeElement | QRCodeElement,
+  content?: string,
+  headers?: string[],
+  onInsert: (field: string) => void,
+  onTestValueChange: (field: string, value: string) => void
+}) {
+  const [fieldName, setFieldName] = useState('');
+  const fields = getPlaceholderFields(content);
+  let suffix = 1;
+  while (fields.includes(`field${suffix}`)) suffix++;
+  const suggestedName = `field${suffix}`;
+  const normalizedName = fieldName.trim();
+  const canInsert = Boolean(normalizedName) && !/[{}]/.test(normalizedName);
+
+  const insertField = (field: string) => {
+    const normalizedField = field.trim();
+    if (!normalizedField || /[{}]/.test(normalizedField)) return;
+    onInsert(normalizedField);
+    setFieldName('');
+  };
 
   return (
-    <div className="space-y-1">
-      <label className="text-[10px] font-semibold text-blue-600">Insert CSV field</label>
-      <select
-        value={field}
-        onChange={(event) => {
-          const nextField = event.target.value;
-          setField('');
-          if (nextField) onInsert(nextField);
+    <div className="space-y-2 rounded-lg border border-blue-100 bg-blue-50/50 p-2.5">
+      <label className="block text-[10px] font-semibold text-blue-700">Placeholders</label>
+      {headers && headers.length > 0 && (
+        <select
+          defaultValue=""
+          onChange={(event) => {
+            if (event.target.value) insertField(event.target.value);
+            event.target.value = '';
+          }}
+          aria-label="Insert CSV column placeholder"
+          className="w-full rounded-md border border-blue-200 bg-white px-2 py-1.5 text-xs text-blue-800 outline-none focus:ring-2 focus:ring-blue-500/20"
+        >
+          <option value="">Insert CSV column...</option>
+          {headers.map((header) => <option key={header} value={header}>{header}</option>)}
+        </select>
+      )}
+      <form
+        className="flex gap-1.5"
+        onSubmit={(event) => {
+          event.preventDefault();
+          insertField(normalizedName || suggestedName);
         }}
-        className="w-full rounded-md border border-blue-200 bg-blue-50 px-2 py-1.5 text-xs text-blue-800 outline-none focus:ring-2 focus:ring-blue-500/20"
       >
-        <option value="">Choose a column...</option>
-        {headers.map((header) => <option key={header} value={header}>{header}</option>)}
-      </select>
+        <input
+          type="text"
+          value={fieldName}
+          onChange={(event) => setFieldName(event.target.value)}
+          placeholder={suggestedName}
+          aria-label="Placeholder field name"
+          className="min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+        />
+        <button
+          type="submit"
+          disabled={Boolean(normalizedName) && !canInsert}
+          className="shrink-0 rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Insert
+        </button>
+      </form>
+      {fields.length > 0 && (
+        <div className="space-y-1.5 border-t border-blue-100 pt-2">
+          {fields.map((field) => (
+            <label key={field} className="flex items-center gap-2">
+              <span className="w-24 shrink-0 truncate font-mono text-[10px] text-slate-500" title={`{{${field}}}`}>
+                {`{{${field}}}`}
+              </span>
+              <input
+                type="text"
+                value={element.placeholderPreviewValues?.[field] ?? getDefaultPlaceholderTestValue(element, field)}
+                onChange={(event) => onTestValueChange(field, event.target.value)}
+                aria-label={`Test value for ${field}`}
+                className="min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              />
+            </label>
+          ))}
+        </div>
+      )}
+      <p className="text-[10px] leading-4 text-slate-500">
+        Inserting replaces the content and uses its current value as this item's preview. CSV data overrides it.
+      </p>
     </div>
   );
 }
@@ -1704,6 +2029,8 @@ function CsvFieldPicker({ headers, onInsert }: { headers: string[], onInsert: (f
 function BatchDataPanel({
   dataset,
   recordIndex,
+  boundFields,
+  missingFields,
   error,
   canExportBatch,
   onImport,
@@ -1713,6 +2040,8 @@ function BatchDataPanel({
 }: {
   dataset: CsvDataset | null,
   recordIndex: number,
+  boundFields: string[],
+  missingFields: string[],
   error: string,
   canExportBatch: boolean,
   onImport: (file: File) => Promise<void>,
@@ -1721,6 +2050,34 @@ function BatchDataPanel({
   onClear: () => void
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [recordNumber, setRecordNumber] = useState(String(recordIndex + 1));
+  const [acknowledgedMissingFields, setAcknowledgedMissingFields] = useState('');
+  const recordCount = dataset?.rows.length ?? 0;
+  const missingFieldsKey = missingFields.join('\u0000');
+  const canExportWithAcknowledgement =
+    canExportBatch && (missingFields.length === 0 || acknowledgedMissingFields === missingFieldsKey);
+  const fieldsToPreview = boundFields.length > 0
+    ? boundFields
+    : dataset?.headers.slice(0, 2) ?? [];
+
+  useEffect(() => {
+    setRecordNumber(String(recordIndex + 1));
+  }, [recordIndex, recordCount]);
+
+  const commitRecordNumber = () => {
+    if (!recordCount || !recordNumber.trim()) {
+      setRecordNumber(String(recordIndex + 1));
+      return;
+    }
+    const parsed = Number(recordNumber);
+    if (!Number.isInteger(parsed)) {
+      setRecordNumber(String(recordIndex + 1));
+      return;
+    }
+    const nextRecord = Math.max(1, Math.min(recordCount, parsed));
+    setRecordNumber(String(nextRecord));
+    onRecordChange(nextRecord - 1);
+  };
 
   return (
     <section className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4" aria-label="CSV batch data">
@@ -1781,12 +2138,53 @@ function BatchDataPanel({
             </button>
           </div>
 
+          {missingFields.length > 0 && (
+            <div role="alert" className="rounded-md border border-amber-200 bg-amber-50 p-2.5 text-[10px] leading-4 text-amber-900">
+              <p className="font-semibold">Some placeholders do not match CSV columns:</p>
+              <p className="mt-1 font-mono">{missingFields.map((field) => `{{${field}}}`).join(', ')}</p>
+              <p className="mt-1">They will remain literal in the exported labels.</p>
+            </div>
+          )}
+
           <div className="rounded-lg border border-slate-200 p-3">
-            <div className="mb-3 flex items-center justify-between">
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Active record</span>
-              <span className="font-mono text-xs font-bold text-slate-700">
-                {recordIndex + 1} / {dataset.rows.length}
-              </span>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <label htmlFor="csv-record-number" className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                Active record
+              </label>
+              <div className="flex items-center gap-1.5 font-mono text-xs font-bold text-slate-700">
+                <input
+                  id="csv-record-number"
+                  type="number"
+                  min={1}
+                  max={dataset.rows.length}
+                  step={1}
+                  value={recordNumber}
+                  aria-label="Go to CSV record"
+                  onChange={(event) => setRecordNumber(event.target.value)}
+                  onBlur={commitRecordNumber}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      commitRecordNumber();
+                      event.currentTarget.blur();
+                    }
+                    if (event.key === 'Escape') {
+                      setRecordNumber(String(recordIndex + 1));
+                      event.currentTarget.blur();
+                    }
+                  }}
+                  className="w-14 rounded border border-slate-200 px-1.5 py-1 text-center text-xs font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                />
+                <button
+                  type="button"
+                  onClick={commitRecordNumber}
+                  aria-label="Go to selected CSV record"
+                  className="rounded px-1.5 py-1 text-[10px] font-semibold text-blue-700 hover:bg-blue-50"
+                >
+                  Go
+                </button>
+                <span>/ {dataset.rows.length}</span>
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -1798,8 +2196,26 @@ function BatchDataPanel({
               >
                 <ChevronLeft size={15} />
               </button>
-              <div className="min-w-0 flex-1 truncate rounded-md bg-slate-50 px-3 py-2 text-center text-[10px] text-slate-600">
-                {dataset.headers.slice(0, 2).map((header) => `${header}: ${dataset.rows[recordIndex][header]}`).join(' · ')}
+              <div
+                aria-label="CSV values used by the label for this record"
+                className="flex min-w-0 flex-1 flex-wrap gap-1.5 rounded-md bg-slate-50 px-2 py-2 text-[10px] text-slate-600"
+              >
+                {fieldsToPreview.map((field) => {
+                  const value = dataset.rows[recordIndex]?.[field];
+                  return (
+                    <span
+                      key={field}
+                      title={`${field}: ${value === undefined ? 'Missing CSV column' : value || '(blank)'}`}
+                      className={cn(
+                        "max-w-full truncate rounded px-1.5 py-1",
+                        value === undefined ? "bg-amber-100 text-amber-900" : "bg-white"
+                      )}
+                    >
+                      <span className="font-semibold">{field}:</span>{' '}
+                      {value === undefined ? 'Missing column' : value || '(blank)'}
+                    </span>
+                  );
+                })}
               </div>
               <button
                 type="button"
@@ -1824,10 +2240,29 @@ function BatchDataPanel({
             </div>
           </div>
 
+          {canExportBatch && missingFields.length > 0 && (
+            <label className="flex items-start gap-2 rounded-md border border-slate-200 p-2.5 text-[10px] leading-4 text-slate-600">
+              <input
+                type="checkbox"
+                checked={acknowledgedMissingFields === missingFieldsKey}
+                onChange={(event) =>
+                  setAcknowledgedMissingFields(event.target.checked ? missingFieldsKey : '')
+                }
+                className="mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span>Download anyway with unmatched placeholders left as-is.</span>
+            </label>
+          )}
+
           <button
             type="button"
             onClick={onExportBatch}
-            disabled={!canExportBatch}
+            disabled={!canExportWithAcknowledgement}
+            title={
+              canExportBatch && missingFields.length > 0 && !canExportWithAcknowledgement
+                ? 'Acknowledge unmatched placeholders before downloading'
+                : undefined
+            }
             className="flex w-full items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-45"
           >
             <FileDown size={14} />
@@ -1881,7 +2316,7 @@ function getSelectedCodeLines(code: string, label: LabelTemplate, selectedIds: s
   const lineIndicesByCommand = new Map<string, number>();
   const graphicLineIndices: number[] = [];
   lines.forEach((line, lineIndex) => {
-    const command = line.match(/^\{(PC\d+|RC\d+|XB\d+|RB\d+);/)?.[1];
+    const command = line.match(/^\{(PC\d+|RC\d+|PV\d+|RV\d+|XB\d+|RB\d+);/)?.[1];
     if (command) lineIndicesByCommand.set(command, lineIndex);
     if (/^\{(?:LC|XR);/.test(line)) graphicLineIndices.push(lineIndex);
   });
@@ -1891,17 +2326,28 @@ function getSelectedCodeLines(code: string, label: LabelTemplate, selectedIds: s
     if (lineIndex !== undefined) selectedLines.add(lineIndex);
   };
   let textCounter = 1;
+  let outlineTextCounter = 0;
   let barcodeCounter = 0;
   let graphicCounter = 0;
 
   label.elements.forEach((element) => {
     if (element.type === 'text') {
-      const commandIndex = textCounter++;
       if (selected.has(element.id)) {
-        const suffix = commandIndex.toString().padStart(3, '0');
-        addCommand(`PC${suffix}`);
-        if (Object.prototype.hasOwnProperty.call(element, 'content')) addCommand(`RC${suffix}`);
+        if (element.fontRendering === 'outline') {
+          const suffix = outlineTextCounter.toString().padStart(2, '0');
+          addCommand(`PV${suffix}`);
+          if (
+            Object.prototype.hasOwnProperty.call(element, 'content') &&
+            !element.inlineText
+          ) addCommand(`RV${suffix}`);
+        } else {
+          const suffix = textCounter.toString().padStart(3, '0');
+          addCommand(`PC${suffix}`);
+          if (Object.prototype.hasOwnProperty.call(element, 'content')) addCommand(`RC${suffix}`);
+        }
       }
+      if (element.fontRendering === 'outline') outlineTextCounter++;
+      else textCounter++;
       return;
     }
 
@@ -1924,8 +2370,9 @@ function getSelectedCodeLines(code: string, label: LabelTemplate, selectedIds: s
   return selectedLines;
 }
 
-function CodePreviewPanel({ label, onExport, selectedIds, recordInfo }: {
+function CodePreviewPanel({ label, copyLabel, onExport, selectedIds, recordInfo }: {
   label: LabelTemplate,
+  copyLabel: LabelTemplate,
   onExport: () => void,
   selectedIds: string[],
   recordInfo?: { index: number, total: number }
@@ -1952,11 +2399,12 @@ function CodePreviewPanel({ label, onExport, selectedIds, recordInfo }: {
     if (!generated.file) return;
 
     try {
+      const code = LabelService.generateLabelFile(copyLabel).code;
       if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(generated.file.code);
+        await navigator.clipboard.writeText(code);
       } else {
         const textarea = document.createElement('textarea');
-        textarea.value = generated.file.code;
+        textarea.value = code;
         textarea.style.position = 'fixed';
         textarea.style.opacity = '0';
         document.body.appendChild(textarea);
@@ -2082,12 +2530,51 @@ function PropertyGrid({ children }: { children: React.ReactNode }) {
   return <div className="grid grid-cols-2 gap-4">{children}</div>
 }
 
+function CommitTextField({
+  value,
+  onCommit,
+  className,
+  multiline = false
+}: {
+  value: string,
+  onCommit: (value: string) => void,
+  className: string,
+  multiline?: boolean
+}) {
+  const [draft, setDraft] = useState(value);
+  const [isFocused, setIsFocused] = useState(false);
+
+  useEffect(() => {
+    if (!isFocused) setDraft(value);
+  }, [value, isFocused]);
+
+  const fieldProps = {
+    className,
+    value: draft,
+    onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setDraft(event.target.value),
+    onFocus: () => setIsFocused(true),
+    onBlur: () => {
+      setIsFocused(false);
+      if (draft !== value) onCommit(draft);
+    },
+    onKeyDown: (event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      if (!multiline && event.key === 'Enter') event.currentTarget.blur();
+    }
+  };
+
+  return multiline
+    ? <textarea {...fieldProps} />
+    : <input type="text" {...fieldProps} />;
+}
+
 function PropertyInput({ 
   label, 
   value, 
   onChange,
   type = 'text',
   step = 1,
+  min,
+  max,
   list
 }: { 
   label: string, 
@@ -2095,6 +2582,8 @@ function PropertyInput({
   onChange: (val: string) => void,
   type?: 'text' | 'number',
   step?: number,
+  min?: number,
+  max?: number,
   list?: string
 }) {
   const [localValue, setLocalValue] = useState(value.toString());
@@ -2106,18 +2595,37 @@ function PropertyInput({
     }
   }, [value, isFocused]);
 
+  const commitValue = (rawValue: string) => {
+    if (type === 'number') {
+      const parsed = Number(rawValue);
+      if (!rawValue.trim() || !Number.isFinite(parsed)) {
+        setLocalValue(value.toString());
+        return;
+      }
+
+      const bounded = Math.max(min ?? -Infinity, Math.min(max ?? Infinity, parsed));
+      const nextValue = bounded.toString();
+      setLocalValue(nextValue);
+      if (nextValue !== value.toString()) onChange(nextValue);
+      return;
+    }
+
+    if (rawValue !== value.toString()) onChange(rawValue);
+  };
+
+  const getCurrentNumber = () => {
+    const localNumber = Number(localValue);
+    return Number.isFinite(localNumber) ? localNumber : Number(value) || 0;
+  };
+
   const handleIncrement = () => {
-    const current = parseFloat(localValue) || 0;
-    const next = (current + step).toFixed(step < 1 ? 1 : 0);
-    onChange(next);
-    setLocalValue(next);
+    const next = (getCurrentNumber() + step).toFixed(step < 1 ? 1 : 0);
+    commitValue(next);
   };
 
   const handleDecrement = () => {
-    const current = parseFloat(localValue) || 0;
-    const next = (current - step).toFixed(step < 1 ? 1 : 0);
-    onChange(next);
-    setLocalValue(next);
+    const next = (getCurrentNumber() - step).toFixed(step < 1 ? 1 : 0);
+    commitValue(next);
   };
 
   return (
@@ -2125,16 +2633,17 @@ function PropertyInput({
       <label className="text-[10px] font-bold text-slate-400 uppercase">{label}</label>
       <div className="relative group">
         <input 
-          type="text" 
+          type={type}
+          min={type === 'number' ? min : undefined}
+          max={type === 'number' ? max : undefined}
+          step={type === 'number' ? step : undefined}
           className="w-full rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all pr-6" 
           value={localValue} 
           list={list}
-          onChange={(e) => {
-            setLocalValue(e.target.value);
-            onChange(e.target.value);
-          }}
+          onChange={(e) => setLocalValue(e.target.value)}
           onFocus={() => setIsFocused(true)}
           onBlur={() => {
+            commitValue(localValue);
             setIsFocused(false);
           }}
           onKeyDown={(e) => {

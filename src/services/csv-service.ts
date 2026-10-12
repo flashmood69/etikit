@@ -115,6 +115,49 @@ export function resolveCsvFields(elements: LabelElement[], row?: Record<string, 
   });
 }
 
+export function resolvePreviewFields(
+  elements: LabelElement[],
+  row?: Record<string, string>
+): LabelElement[] {
+  return elements.map((element) => {
+    if (!('content' in element) || typeof element.content !== 'string') return element;
+    return {
+      ...element,
+      content: element.content.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (token, rawField: string) => {
+        const field = rawField.trim();
+        if (row && Object.prototype.hasOwnProperty.call(row, field)) return row[field];
+        const previewValue = element.placeholderPreviewValues?.[field];
+        if (previewValue !== undefined) return previewValue;
+        return getDefaultPlaceholderTestValue(element, field) || token;
+      })
+    } as LabelElement;
+  });
+}
+
+export function getPlaceholderFields(content: string | undefined): string[] {
+  if (!content) return [];
+  return [...new Set(
+    Array.from(content.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g), ([, field]) => field.trim())
+      .filter(Boolean)
+  )];
+}
+
+export function getDefaultPlaceholderTestValue(element: LabelElement, field: string): string {
+  if (element.type === 'text') return `Sample ${field}`;
+  if (element.type === 'qrcode') return `https://example.com/${encodeURIComponent(field)}`;
+  if (element.type === 'barcode') {
+    switch (element.barcodeType) {
+      case 'ean13': return '1234567890128';
+      case 'ean8': return '12345678';
+      case 'upca': return '123456789012';
+      case 'upce': return '04210005';
+      case 'code39': return 'SAMPLE123';
+      default: return '12345678';
+    }
+  }
+  return '';
+}
+
 export function hasCsvBindings(elements: LabelElement[], headers: string[]) {
   const availableHeaders = new Set(headers);
   return elements.some((element) => {

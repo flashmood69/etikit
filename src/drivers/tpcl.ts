@@ -82,6 +82,13 @@ function getTpclFontId(el: TextElement): string {
   return TPCL_FONT_METADATA[0]?.key ?? 'G';
 }
 
+function outlineScaleFromSize(size: number, font: string) {
+  const fontSizePt = TPCL_FONT_PRESETS[font]?.fontSizePt ?? 10;
+  const nominalSize = fontSizePt * 25.4 / 72 * COORDS_PER_MM;
+  const scale = Math.max(0.1, Math.round((size / nominalSize) * 100) / 100);
+  return scale >= 10 ? Math.round(scale * 10) : scale;
+}
+
 const BARCODE_MAP: Record<string, string> = {
   'code128': '9',
   'ean13': '2',
@@ -115,7 +122,14 @@ export class TPCLDriver implements LabelDriver {
       const normalized = value < 10 ? Math.round(value * 10) : Math.round(value);
       return Math.max(0, Math.min(99, normalized));
     };
-
+    const normalizeOutlineSize = (scale: unknown, font: string) => {
+      const fontSizePt = TPCL_FONT_PRESETS[font]?.fontSizePt ?? 10;
+      const nominalSize = fontSizePt * 25.4 / 72 * COORDS_PER_MM;
+      const normalizedScale = typeof scale === 'number' && Number.isFinite(scale) && scale > 0
+        ? (scale >= 10 ? scale / 10 : scale)
+        : 1;
+      return Math.max(1, Math.min(9999, Math.round(nominalSize * normalizedScale)));
+    };
     // Start with common header
     lines.push('{C|}');
     
@@ -128,12 +142,12 @@ export class TPCLDriver implements LabelDriver {
     lines.push('{AX;+000,+000,+00|}');
     lines.push('{AY;+10,0|}');
 
-    const pcCommands: string[] = [];
+    const textCommands: string[] = [];
     const xbCommands: string[] = [];
-    const rcCommands: string[] = [];
     const graphicCommands: string[] = [];
 
     let textCounter = 1;
+    let outlineTextCounter = 0;
     let barcodeCounter = 0;
 
     label.elements.forEach((el) => {
@@ -145,15 +159,31 @@ export class TPCLDriver implements LabelDriver {
       switch (el.type) {
         case 'text': {
           const textEl = el as TextElement;
+          if (textEl.fontRendering === 'outline') {
+            const h = normalizeOutlineSize(textEl.height, textEl.fontCode).toString().padStart(4, '0');
+            const w = normalizeOutlineSize(textEl.width, textEl.fontCode).toString().padStart(4, '0');
+            const font = getTpclFontId(textEl);
+            const pvId = `PV${outlineTextCounter.toString().padStart(2, '0')}`;
+            const rvId = `RV${outlineTextCounter.toString().padStart(2, '0')}`;
+            outlineTextCounter++;
+            const inline = textEl.inlineText && Object.prototype.hasOwnProperty.call(textEl, 'content');
+            const inlineData = inline ? `=${textEl.content ?? ''}` : '';
+            textCommands.push(`{${pvId};${x},${y},${h},${w},${font},${rotationStr},B${inlineData}|}`);
+            if (!inline && Object.prototype.hasOwnProperty.call(textEl, 'content')) {
+              textCommands.push(`{${rvId};${textEl.content ?? ''}|}`);
+            }
+            break;
+          }
+
           const h = normalizeMag(textEl.height).toString().padStart(2, '0');
           const w = normalizeMag(textEl.width).toString().padStart(2, '0');
           const font = getTpclFontId(textEl);
           const pcId = `PC${textCounter.toString().padStart(3, '0')}`;
           const rcId = `RC${textCounter.toString().padStart(3, '0')}`;
           textCounter++;
-          pcCommands.push(`{${pcId};${x},${y},${h},${w},${font},${rotationStr},B|}`);
+          textCommands.push(`{${pcId};${x},${y},${h},${w},${font},${rotationStr},B|}`);
           if (Object.prototype.hasOwnProperty.call(textEl, 'content')) {
-            rcCommands.push(`{${rcId};${textEl.content ?? ''}|}`);
+            textCommands.push(`{${rcId};${textEl.content ?? ''}|}`);
           }
           break;
         }
@@ -206,9 +236,8 @@ export class TPCLDriver implements LabelDriver {
       }
     });
 
-    lines.push(...pcCommands);
+    lines.push(...textCommands);
     lines.push(...xbCommands);
-    lines.push(...rcCommands);
     lines.push(...graphicCommands);
 
     const ps = label.printSettings;
@@ -312,6 +341,59 @@ export class TPCLDriver implements LabelDriver {
             width: def.width,
             height: def.height,
             content: content
+          });
+        }
+      } else if (commandType.startsWith('PV')) {
+        const commandData = cleanCmd.substring(commandType.length + 1);
+        const params = commandData.split(',');
+        if (params.length >= 7) {
+          const attributeAndData = params.slice(6).join(',');
+          const inlineSeparator = attributeAndData.indexOf('=');
+          const font = params[4];
+          const def = {
+            x: parseInt(params[0]),
+            y: parseInt(params[1]),
+            height: parseInt(params[2]),
+            width: parseInt(params[3]),
+            font,
+            rotation: parseInt(params[5]),
+            id: Math.random().toString(36).substring(2, 11),
+            inlineText: inlineSeparator >= 0,
+            content: inlineSeparator >= 0 ? attributeAndData.substring(inlineSeparator + 1) : undefined
+          };
+          textDefs.set(commandType, def);
+          if (def.inlineText) {
+            elements.push({
+              id: def.id,
+              type: 'text',
+              x: def.x,
+              y: def.y,
+              rotation: def.rotation,
+              fontCode: def.font,
+              width: outlineScaleFromSize(def.width, def.font),
+              height: outlineScaleFromSize(def.height, def.font),
+              fontRendering: 'outline',
+              inlineText: true,
+              content: def.content
+            });
+          }
+        }
+      } else if (commandType.startsWith('RV')) {
+        const pvId = commandType.replace('RV', 'PV');
+        const def = textDefs.get(pvId);
+        if (def) {
+          elements.push({
+            id: def.id,
+            type: 'text',
+            x: def.x,
+            y: def.y,
+            rotation: def.rotation,
+            fontCode: def.font,
+            width: outlineScaleFromSize(def.width, def.font),
+            height: outlineScaleFromSize(def.height, def.font),
+            fontRendering: 'outline',
+            inlineText: false,
+            content: cleanCmd.substring(commandType.length + 1)
           });
         }
       } else if (commandType.startsWith('XB')) {

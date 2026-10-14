@@ -141,5 +141,6 @@ vite.config.ts.timestamp-*
 .vite/
 
 # Ad Hoc files
+.trae/
 specs/
 build/*

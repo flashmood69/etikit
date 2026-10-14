@@ -209,11 +209,15 @@ export class TPCLDriver implements LabelDriver {
           const qrSize = Math.max(1, Math.min(20, baseDotsToTargetDots(qrEl.size))).toString().padStart(2, '0');
           const qrRotation = Math.max(0, Math.min(3, Math.round(qrEl.rotation || 0))).toString();
           const errorCorrection = qrEl.errorCorrection || 'H';
+          const qrModel = qrEl.qrModel ?? 'M1';
+          const modelParameter = qrModel === 'M2' || (qrModel === 'M3' && errorCorrection === 'L')
+            ? `,${qrModel}`
+            : '';
 
           const xbId = `XB${barcodeCounter.toString().padStart(2, '0')}`;
           const rbId = `RB${barcodeCounter.toString().padStart(2, '0')}`;
           barcodeCounter++;
-          xbCommands.push(`{${xbId};${x},${y},T,${errorCorrection},${qrSize},A,${qrRotation}|}`);
+          xbCommands.push(`{${xbId};${x},${y},T,${errorCorrection},${qrSize},A,${qrRotation}${modelParameter}|}`);
           xbCommands.push(`{${rbId};${qrEl.content ?? ''}|}`);
           break;
         }
@@ -412,7 +416,7 @@ export class TPCLDriver implements LabelDriver {
         if (def) {
           const params = def.params;
           const content = cleanCmd.substring(commandType.length + 1);
-          if (params.length === 7 && params[2] === 'T') {
+          if (params.length >= 7 && params[2] === 'T') {
              elements.push({
                id: def.id,
                type: 'qrcode',
@@ -421,7 +425,12 @@ export class TPCLDriver implements LabelDriver {
                rotation: parseInt(params[6]),
                size: parseInt(params[4]),
                content: content,
-               errorCorrection: params[3] as any
+               errorCorrection: params[3] as any,
+               qrModel: params[7] === 'M2'
+                 ? 'M2'
+                 : params[7] === 'M3' && params[3] === 'L'
+                   ? 'M3'
+                   : 'M1'
              });
           } else {
              elements.push({

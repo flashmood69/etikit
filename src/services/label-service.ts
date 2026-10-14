@@ -344,7 +344,14 @@ export function createDefaultElement(type: ElementType, protocol: Protocol, prin
       } as BarcodeElement;
     }
     case 'qrcode':
-      return { ...base, type: 'qrcode', content: '12345678', size: 5 } as QRCodeElement;
+      return {
+        ...base,
+        type: 'qrcode',
+        content: '12345678',
+        size: 5,
+        errorCorrection: 'H',
+        qrModel: 'M1'
+      } as QRCodeElement;
     case 'line':
       return { ...base, type: 'line', x2: 200, y2: 100, thickness: 3 } as LineElement;
     case 'rectangle':

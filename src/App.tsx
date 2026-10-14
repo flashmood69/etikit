@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { Plus, Save, FileDown, Type, Barcode as BarcodeIcon, Square, Minus, Trash2, Move, Settings, Code2, Copy, ClipboardPaste, Scissors, Check, AlertTriangle, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, QrCode, Upload, Undo2, Redo2, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical, Expand, LayoutGrid, Grid3x3, Magnet, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, MousePointer2 } from 'lucide-react'
+import { Plus, Save, FileDown, Type, Barcode as BarcodeIcon, Square, Minus, Trash2, Move, Settings, Code2, Copy, ClipboardPaste, Scissors, Check, AlertTriangle, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, QrCode, Upload, Undo2, Redo2, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical, Expand, LayoutGrid, Grid3x3, Magnet, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, MousePointer2, Ruler } from 'lucide-react'
 import Draggable from 'react-draggable'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
@@ -44,6 +44,8 @@ function offsetElement(element: LabelElement, offset: number, id = element.id): 
 }
 
 const LOCAL_DRAFT_KEY = 'etikit:local-draft:v1';
+const RULER_WIDTH_PX = 28;
+const RULER_HEIGHT_PX = 24;
 
 type DraftRecoveryState =
   | { status: 'checking' | 'ready' }
@@ -51,6 +53,79 @@ type DraftRecoveryState =
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
+}
+
+function getRulerLabelInterval(zoom: number) {
+  return [1, 2, 5, 10, 20, 50, 100, 200, 500].find((interval) => interval * zoom >= 36) ?? 1000;
+}
+
+function MillimeterRuler({ lengthMm, zoom, orientation }: {
+  lengthMm: number;
+  zoom: number;
+  orientation: 'horizontal' | 'vertical';
+}) {
+  const lengthPx = lengthMm * zoom;
+  const isHorizontal = orientation === 'horizontal';
+  const tickStepMm = zoom < 1 ? 5 : zoom < 2 ? 2 : 1;
+  const labelIntervalMm = getRulerLabelInterval(zoom);
+  const ticks = Array.from(
+    { length: Math.floor(lengthMm / tickStepMm) + 1 },
+    (_, index) => index * tickStepMm
+  );
+
+  return (
+    <svg
+      aria-label={`${orientation} ruler in millimeters`}
+      className="pointer-events-none block shrink-0 overflow-visible text-slate-500"
+      role="img"
+      width={isHorizontal ? lengthPx : RULER_WIDTH_PX}
+      height={isHorizontal ? RULER_HEIGHT_PX : lengthPx}
+      viewBox={`0 0 ${isHorizontal ? lengthPx : RULER_WIDTH_PX} ${isHorizontal ? RULER_HEIGHT_PX : lengthPx}`}
+    >
+      <line
+        x1={isHorizontal ? 0 : RULER_WIDTH_PX - 1}
+        y1={isHorizontal ? RULER_HEIGHT_PX - 1 : 0}
+        x2={isHorizontal ? lengthPx : RULER_WIDTH_PX - 1}
+        y2={isHorizontal ? RULER_HEIGHT_PX - 1 : lengthPx}
+        stroke="currentColor"
+        strokeWidth="1"
+      />
+      {ticks.map((millimeters) => {
+        const position = millimeters * zoom;
+        const isMajor = millimeters % 10 === 0;
+        const isMedium = millimeters % 5 === 0;
+        const tickLength = isMajor ? 9 : isMedium ? 6 : 3;
+        const label = millimeters % labelIntervalMm === 0;
+
+        return (
+          <g key={millimeters}>
+            <line
+              x1={isHorizontal ? position : RULER_WIDTH_PX - 1 - tickLength}
+              y1={isHorizontal ? RULER_HEIGHT_PX - 1 - tickLength : position}
+              x2={isHorizontal ? position : RULER_WIDTH_PX - 1}
+              y2={isHorizontal ? RULER_HEIGHT_PX - 1 : position}
+              stroke="currentColor"
+              strokeWidth="1"
+              shapeRendering="crispEdges"
+            />
+            {label && position < lengthPx - 8 && (
+              <text
+                x={isHorizontal ? position + 2 : RULER_WIDTH_PX / 2}
+                y={isHorizontal ? 9 : position}
+                fill="currentColor"
+                fontSize="8"
+                textAnchor={isHorizontal ? 'start' : 'middle'}
+                dominantBaseline="middle"
+                transform={isHorizontal ? undefined : `rotate(-90 ${RULER_WIDTH_PX / 2} ${position})`}
+              >
+                {millimeters}
+              </text>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
 }
 
 function isSavedElement(value: unknown): value is LabelElement {
@@ -151,6 +226,7 @@ function App() {
 
   const [zoom, setZoom] = useState(4); // 1mm = 4px
   const [isAutoZoom, setIsAutoZoom] = useState(false);
+  const [showRulers, setShowRulers] = useState(true);
   const [isNewConfirmOpen, setIsNewConfirmOpen] = useState(false);
   const [newLabelName, setNewLabelName] = useState('Untitled');
   const [newLabelPresetId, setNewLabelPresetId] = useState(LabelService.DEFAULT_LABEL_SIZE_PRESET_ID);
@@ -744,8 +820,8 @@ function App() {
 
     const compute = () => {
       const paddingPx = 32;
-      const availableWidthPx = Math.max(0, el.clientWidth - paddingPx);
-      const availableHeightPx = Math.max(0, el.clientHeight - paddingPx);
+      const availableWidthPx = Math.max(0, el.clientWidth - paddingPx - (showRulers ? RULER_WIDTH_PX : 0));
+      const availableHeightPx = Math.max(0, el.clientHeight - paddingPx - (showRulers ? RULER_HEIGHT_PX : 0));
       if (availableWidthPx <= 0 || availableHeightPx <= 0) return;
 
       const next = Math.min(
@@ -765,7 +841,7 @@ function App() {
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [isAutoZoom, labelSize.width, labelSize.height]);
+  }, [isAutoZoom, labelSize.width, labelSize.height, showRulers]);
 
   const exportLabel = () => {
     const template: LabelTemplate = {
@@ -1293,6 +1369,21 @@ function App() {
               </button>
               <button
                 type="button"
+                onClick={() => setShowRulers((visible) => !visible)}
+                aria-label={showRulers ? "Hide rulers" : "Show rulers"}
+                aria-pressed={showRulers}
+                title={showRulers ? "Hide rulers" : "Show rulers"}
+                className={cn(
+                  "flex h-8 w-8 items-center justify-center rounded-md border transition-colors",
+                  showRulers
+                    ? "border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100"
+                    : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                )}
+              >
+                <Ruler size={16} />
+              </button>
+              <button
+                type="button"
                 onClick={() => setGridSettings({ enabled: !gridSettings.enabled })}
                 aria-label={gridSettings.enabled ? "Disable Snap to Grid" : "Enable Snap to Grid"}
                 aria-pressed={gridSettings.enabled}
@@ -1360,14 +1451,33 @@ function App() {
             className="w-full flex-1 min-h-0 flex items-start justify-center"
             onClick={() => setSelectedIds([])}
           >
-            <div 
-              className="bg-white shadow-2xl border border-slate-300 relative transition-all duration-300 shrink-0" 
-              style={{ 
-                width: `${labelSize.width * zoom}px`, 
-                height: `${labelSize.height * zoom}px`,
+            <div
+              className="grid shrink-0"
+              style={{
+                gridTemplateColumns: showRulers
+                  ? `${RULER_WIDTH_PX}px ${labelSize.width * zoom}px`
+                  : `${labelSize.width * zoom}px`,
+                gridTemplateRows: showRulers
+                  ? `${RULER_HEIGHT_PX}px ${labelSize.height * zoom}px`
+                  : `${labelSize.height * zoom}px`,
+                transform: showRulers ? `translateX(-${RULER_WIDTH_PX / 2}px)` : undefined
               }}
-              onClick={() => setSelectedIds([])}
             >
+              {showRulers && (
+                <>
+                  <div aria-hidden="true" />
+                  <MillimeterRuler lengthMm={labelSize.width} zoom={zoom} orientation="horizontal" />
+                  <MillimeterRuler lengthMm={labelSize.height} zoom={zoom} orientation="vertical" />
+                </>
+              )}
+              <div
+                className="bg-white shadow-2xl border border-slate-300 relative transition-all duration-300 shrink-0"
+                style={{
+                  width: `${labelSize.width * zoom}px`,
+                  height: `${labelSize.height * zoom}px`,
+                }}
+                onClick={() => setSelectedIds([])}
+              >
               {/* Grid Pattern */}
               {gridSettings.visible && (
                 <div className="absolute inset-0 opacity-[0.05] pointer-events-none" 
@@ -1400,32 +1510,33 @@ function App() {
                 </div>
               )}
 
-              {displayElements.map((el) => (
-                <DraggableElement 
-                  key={el.id} 
-                  element={el} 
-                  zoom={zoom} 
-                  protocol={protocol}
-                  printSettings={printSettings}
-                  supportedFonts={currentDriver.supportedFonts}
-                  isSelected={selectedIds.includes(el.id)}
-                  onSelect={(e) => {
-                    if (e?.shiftKey) {
-                      if (selectedIds.includes(el.id)) {
-                        setSelectedIds(selectedIds.filter(id => id !== el.id));
+                {displayElements.map((el) => (
+                  <DraggableElement
+                    key={el.id}
+                    element={el}
+                    zoom={zoom}
+                    protocol={protocol}
+                    printSettings={printSettings}
+                    supportedFonts={currentDriver.supportedFonts}
+                    isSelected={selectedIds.includes(el.id)}
+                    onSelect={(e) => {
+                      if (e?.shiftKey) {
+                        if (selectedIds.includes(el.id)) {
+                          setSelectedIds(selectedIds.filter(id => id !== el.id));
+                        } else {
+                          setSelectedIds([...selectedIds, el.id]);
+                        }
                       } else {
-                        setSelectedIds([...selectedIds, el.id]);
+                        setSelectedIds([el.id]);
                       }
-                    } else {
-                      setSelectedIds([el.id]);
+                    }}
+                    onDrag={(data) => handleDrag(el.id, data)}
+                    onResize={(scaleX, scaleY, anchorX, anchorY) =>
+                      handleResize(el.id, scaleX, scaleY, anchorX, anchorY)
                     }
-                  }}
-                  onDrag={(data) => handleDrag(el.id, data)}
-                  onResize={(scaleX, scaleY, anchorX, anchorY) =>
-                    handleResize(el.id, scaleX, scaleY, anchorX, anchorY)
-                  }
-                />
-              ))}
+                  />
+                ))}
+              </div>
             </div>
           </div>
         </main>
@@ -1781,14 +1892,59 @@ function App() {
                 )}
 
                 {selectedElement.type === 'qrcode' && (
-                  <PropertyInput 
-                    label="Size" 
-                    value={(selectedElement as QRCodeElement).size} 
-                    onChange={(val) => updateElement(selectedElement.id, { size: parseInt(val) })}
-                    type="number"
-                    step={1}
-                    min={1}
-                  />
+                  <>
+                    <PropertyInput
+                      label="Size"
+                      value={(selectedElement as QRCodeElement).size}
+                      onChange={(val) => updateElement(selectedElement.id, { size: parseInt(val) })}
+                      type="number"
+                      step={1}
+                      min={1}
+                    />
+                    {protocol === 'tpcl' && (
+                      <div className="space-y-3">
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase">Reliability</label>
+                          <select
+                            className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                            value={(selectedElement as QRCodeElement).errorCorrection ?? 'H'}
+                            onChange={(event) => {
+                              const qr = selectedElement as QRCodeElement;
+                              const errorCorrection = event.target.value as NonNullable<QRCodeElement['errorCorrection']>;
+                              updateElement(selectedElement.id, {
+                                errorCorrection,
+                                ...(errorCorrection !== 'L' && qr.qrModel === 'M3' ? { qrModel: 'M1' } : {})
+                              });
+                            }}
+                          >
+                            <option value="L">L · High density</option>
+                            <option value="M">M · Standard</option>
+                            <option value="Q">Q · Reliability</option>
+                            <option value="H">H · High reliability (default)</option>
+                          </select>
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase">QR Model</label>
+                          <select
+                            className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                            value={(selectedElement as QRCodeElement).qrModel ?? 'M1'}
+                            onChange={(event) => updateElement(selectedElement.id, {
+                              qrModel: event.target.value as NonNullable<QRCodeElement['qrModel']>
+                            })}
+                          >
+                            <option value="M1">M1 · Model 1 (default)</option>
+                            <option value="M2">M2 · Model 2</option>
+                            <option value="M3" disabled={(selectedElement as QRCodeElement).errorCorrection !== 'L'}>
+                              M3 · MicroQR (requires high density)
+                            </option>
+                          </select>
+                        </div>
+                        <p className="text-[10px] leading-4 text-slate-500">
+                          The canvas uses a standard QR preview; the selected model is applied to TPCL output.
+                        </p>
+                      </div>
+                    )}
+                  </>
                 )}
 
                 {selectedElement.type === 'line' && (

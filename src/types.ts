@@ -40,6 +40,7 @@ export interface QRCodeElement extends BaseElement {
   content?: string;
   size: number;
   errorCorrection?: 'L' | 'M' | 'Q' | 'H';
+  qrModel?: 'M1' | 'M2' | 'M3';
 }
 
 export interface LineElement extends BaseElement {

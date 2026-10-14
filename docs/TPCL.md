@@ -262,6 +262,38 @@ In the supplied template convention, `T` selects QR Code. The remaining
 parameters are barcode-specific; do not assume their meaning is the same for
 another model.
 
+For QR Code, the parameters after `T` are reliability level, cell size,
+character mode, rotation, and an optional model:
+
+```text
+{XB01;x,y,T,reliability,size,mode,rotation[,model]|}
+```
+
+| Parameter | Meaning |
+|---|---|
+| `reliability` | Error-correction/reliability level: `L` = high density, `M` = standard, `Q` = reliability, `H` = high reliability (default). |
+| `size` | QR cell/module size, as supported by the printer. |
+| `mode` | Character mode; `A` is used by the editor. |
+| `rotation` | QR rotation; the editor uses `0` through `3`. |
+| `model` | Optional QR model: `M1` (default), `M2`, or `M3` (MicroQR). |
+
+When the model is omitted, it defaults to `M1`. The editor leaves this
+parameter out for `M1` to preserve the standard command form. `M3` can only be
+used with reliability level `L` (high density).
+
+Examples:
+
+```text
+{XB01;0800,0150,T,H,05,A,1|}
+{XB01;0800,0150,T,Q,05,A,1,M2|}
+{XB01;0800,0150,T,L,05,A,1,M3|}
+```
+
+These examples show, in order, the default `M1` with high reliability, `M2`
+with reliability `Q`, and `M3` (MicroQR) with required high-density reliability
+`L`. The coordinates, cell size, character mode, and rotation follow the
+supplied template; supported values can vary by printer model.
+
 Common type identifiers in the supplied notes:
 
 | ID | Symbology |
